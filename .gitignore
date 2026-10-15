@@ -1,0 +1,40 @@
+node_modules/
+src/hosts/electron/renderer.bundle.js
+CubismSdkForWeb-*/
+*.zip
+STATUS.md
+
+# Local JDK toolchains (large, machine-specific binaries)
+/tools/jdk-*/
+
+# macOS / editor cruft
+.DS_Store
+*.swp
+
+# Android local/build output
+src/hosts/android/.gradle/
+src/hosts/android/build/
+src/hosts/android/app/build/
+src/hosts/android/local.properties
+src/hosts/android/app/src/main/assets/
+
+# Reference code from upstream py-xiaozhi (cloned for study only)
+reference/
+
+# Electron packaging output (electron-builder)
+dist-app/
+dist/
+
+# Secrets — commit only .env.example
+.env
+.env.*
+!.env.example
+scripts/.xiaozhi-activation.json
+
+# Python host-service virtualenv + runtime data
+host-service/.venv/
+host-service/data/
+host-service/captures/
+host-service/recordings/
+__pycache__/
+*.pyc

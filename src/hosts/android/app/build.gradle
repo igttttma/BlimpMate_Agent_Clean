@@ -1,0 +1,117 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.l2dfacecontrol.host"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.l2dfacecontrol.host"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    // Release signing. Provide these in gradle.properties (project or
+    // ~/.gradle/gradle.properties) or via -P / ORG_GRADLE_PROJECT_* env to sign a
+    // distributable build:
+    //   BM_RELEASE_STORE_FILE=/abs/path/blimpmate-release.jks
+    //   BM_RELEASE_STORE_PASSWORD=...
+    //   BM_RELEASE_KEY_ALIAS=blimpmate
+    //   BM_RELEASE_KEY_PASSWORD=...
+    // Create the keystore once with:
+    //   keytool -genkeypair -v -keystore blimpmate-release.jks \
+    //     -alias blimpmate -keyalg RSA -keysize 2048 -validity 10000
+    signingConfigs {
+        release {
+            def storeFilePath = project.findProperty("BM_RELEASE_STORE_FILE")
+            if (storeFilePath) {
+                storeFile file(storeFilePath)
+                storePassword project.findProperty("BM_RELEASE_STORE_PASSWORD")
+                keyAlias project.findProperty("BM_RELEASE_KEY_ALIAS")
+                keyPassword project.findProperty("BM_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // WebView host: app logic is JS in assets, so keep R8 off to avoid
+            // stripping the thin Java shell / the JS-bridge reflection surface.
+            minifyEnabled false
+            shrinkResources false
+            // Sign with the release keystore when configured; otherwise fall back
+            // to the debug keystore so `assembleRelease` still produces an
+            // installable (debug-signed) APK for on-device testing.
+            signingConfig project.findProperty("BM_RELEASE_STORE_FILE") != null ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+}
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.12.1"
+    implementation "androidx.core:core:1.13.1"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
+    implementation files("libs/sherpa-onnx-1.13.4.aar")
+}
+
+// Sync (not Copy): prunes stale files from each assets/* subdir so a renamed/removed
+// source can't linger in an incremental build (Copy leaves orphans; `gradlew clean`
+// does not touch src/main/assets). Each into() MUST stay a disjoint subdir of assets/
+// — never nest one task's dest inside another's, or two Syncs would delete each other's
+// output. Run `npm run build:web` before the build so the *.bundle.js exist in src/shared-web
+// (they are inside syncSharedWeb's from(), so Sync preserves them). Operator-authored
+// assets/blimpmate_config.json sits at the assets/ root (no task targets it) and is untouched.
+tasks.register("syncSharedWeb", Sync) {
+    from("${rootDir}/../../shared-web")
+    into("${projectDir}/src/main/assets/app")
+}
+
+tasks.register("syncCore", Sync) {
+    from("${rootDir}/../../core")
+    into("${projectDir}/src/main/assets/core")
+}
+
+tasks.register("syncBridge", Sync) {
+    from("${rootDir}/../../bridge")
+    into("${projectDir}/src/main/assets/bridge")
+}
+
+tasks.register("syncXiaozhi", Sync) {
+    from("${rootDir}/../../xiaozhi")
+    into("${projectDir}/src/main/assets/xiaozhi")
+}
+
+tasks.register("syncVendor", Sync) {
+    from("${rootDir}/../../shared-web/vendor")
+    into("${projectDir}/src/main/assets/vendor")
+}
+
+tasks.register("syncModel", Sync) {
+    from("${rootDir}/../../../black_origin_face")
+    into("${projectDir}/src/main/assets/black_origin_face")
+}
+
+tasks.register("syncWakeModel", Sync) {
+    into("${projectDir}/src/main/assets/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01")
+
+    from("${rootDir}/../../../host-service/data/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01") {
+        include "tokens.txt"
+        include "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
+        include "decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
+        include "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
+        rename { name -> name.replace(".int8.onnx", ".onnx") }
+    }
+    from("${rootDir}/../../../host-service/wake_word/keywords.en.txt") {
+        rename { "keywords.txt" }
+    }
+}
+
+preBuild.dependsOn("syncSharedWeb", "syncCore", "syncBridge", "syncXiaozhi", "syncVendor", "syncModel", "syncWakeModel")

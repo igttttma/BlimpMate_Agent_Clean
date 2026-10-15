@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BlimpMate Display Proxy</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      background: #0e1116;
+      color: #e7edf5;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 10px;
+      padding: 10px;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    #status {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+    .screen-wrap {
+      position: relative;
+      min-height: 120px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+    .screen {
+      width: 100%;
+      min-height: 260px;
+      max-height: calc(100vh - 260px);
+      display: block;
+      object-fit: contain;
+      background: #000;
+    }
+  .meta {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .meta code {
+      word-break: break-all;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 6px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      background: transparent;
+      color: #fff;
+      cursor: pointer;
+    }
+    .btn:active { opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h2 style="margin: 0; font-size: 18px;">BlimpMate Display Proxy</h2>
+    <button class="btn" id="refreshBtn" type="button">Refresh screenshot</button>
+  </div>
+  <div class="screen-wrap">
+    <img id="screen" class="screen" alt="Live screen from PC" />
+  </div>
+    <div class="meta">
+      <div>Status: <span id="connState">Disconnected</span></div>
+      <div>Page: <code id="currentPage">-</code></div>
+      <div>Subtitle: <code id="subtitle">-</code></div>
+      <div>Notifications: <code id="notification">-</code></div>
+      <div>Todos: <code id="todoState">-</code></div>
+      <div>Media: <code id="mediaState">-</code></div>
+      <div>Host audio: <code id="hostAudioState">-</code></div>
+      <div>Call: <code id="callState">-</code></div>
+      <div>Summary: <code id="systemSummary">-</code></div>
+    </div>
+  <div class="actions">
+    <span>Service: </span>
+    <code>http://<span id="hostText">127.0.0.1</span>:__DISPLAY_PORT__</code>
+    <a href="/app" target="_blank" class="btn" style="text-decoration:none">Open full display page</a>
+  </div>
+
+  <script>
+    const screenEl = document.getElementById("screen");
+    const connStateEl = document.getElementById("connState");
+    const currentPageEl = document.getElementById("currentPage");
+    const subtitleEl = document.getElementById("subtitle");
+    const notificationEl = document.getElementById("notification");
+    const todoStateEl = document.getElementById("todoState");
+    const mediaStateEl = document.getElementById("mediaState");
+    const hostAudioStateEl = document.getElementById("hostAudioState");
+    const callStateEl = document.getElementById("callState");
+    const systemSummaryEl = document.getElementById("systemSummary");
+    const hostTextEl = document.getElementById("hostText");
+    const refreshBtn = document.getElementById("refreshBtn");
+
+    const host = location.hostname || "127.0.0.1";
+    hostTextEl.textContent = host;
+
+    let tick = 0;
+    function normalizeTodoDisplay(state) {
+      if (!state) return { total: 0, pending: 0, list: [] };
+      if (Array.isArray(state)) {
+        return {
+          total: state.length,
+          pending: state.filter((item) => !item?.completed).length,
+          list: state
+        };
+      }
+      if (typeof state === "object") {
+        const list = Array.isArray(state.todos) ? state.todos : [];
+        const total = Number.isFinite(Number(state.total)) ? Number(state.total) : list.length;
+        const pending = Number.isFinite(Number(state.pending))
+          ? Number(state.pending)
+          : list.filter((item) => !item?.completed).length;
+        return { total, pending, list };
+      }
+      return { total: 0, pending: 0, list: [] };
+    }
+
+    function refreshScreen() {
+      tick += 1;
+      screenEl.src = "/capture.jpg?_=" + Date.now() + "&tick=" + tick;
+      screenEl.onerror = () => {};
+    }
+    function applyState(state = {}) {
+      const display = state["blimpmate.display_state_v1"] || {};
+      const notifications = state["blimpmate.notifications_v1"] || {};
+      const music = state["blimpmate.music_v1"] || {};
+      const hostAudio = state["blimpmate.host_audio_v1"] || {};
+      const call = state["blimpmate.call_v1"] || {};
+      const systemStatus = state["blimpmate.system_status_v1"] || {};
+      const rawTodos = state["blimpmate.todos_v1"] || {};
+      const normalizedTodos = normalizeTodoDisplay(rawTodos);
+
+      currentPageEl.textContent = display.page || "-";
+      subtitleEl.textContent = display.subtitle || "-";
+      notificationEl.textContent = Array.isArray(notifications.notifications)
+        ? `${notifications.notifications.length} / latest=${notifications.notifications[0]?.title || "none"}`
+        : "-";
+      const total = Number.isFinite(Number(normalizedTodos.total)) ? Number(normalizedTodos.total) : 0;
+      const pending = Number.isFinite(Number(normalizedTodos.pending)) ? Number(normalizedTodos.pending) : 0;
+      todoStateEl.textContent = `${pending}/${total}`;
+      mediaStateEl.textContent = music?.visible === false ? "Media: off" : [
+        music?.status || "idle",
+        music?.title || "media",
+        music?.source ? `src=${music.source}` : ""
+      ].filter(Boolean).join(" / ");
+
+      const hostAudioPieces = [
+        hostAudio?.status || "unknown",
+        hostAudio?.title || hostAudio?.source || "",
+        Number.isFinite(Number(hostAudio?.volume)) ? `vol=${Math.round(Number(hostAudio.volume))}` : ""
+      ].filter(Boolean);
+      hostAudioStateEl.textContent = hostAudioPieces.length ? hostAudioPieces.join(" / ") : "unknown";
+
+      const callText = call?.active
+        ? `active (${call.lastAction || "in-call"})`
+        : call?.ringing
+          ? `ringing`
+          : call?.state || "idle";
+      callStateEl.textContent = callText;
+
+      const summary = systemStatus?.summary;
+      const summaryText = summary
+        ? `${summary.countsText || "-"} | hostAudio=${summary.services?.hostAudioStatus || "unknown"}`
+        : `${stateSummaryString(rawTodos)} | hostAudio=${hostAudio?.status || "unknown"}`;
+      systemSummaryEl.textContent = summaryText;
+    }
+
+    function stateSummaryString(rawTodos) {
+      const todos = normalizeTodoDisplay(rawTodos);
+      return `Todos ${Number.isFinite(Number(todos.total)) ? `${todos.pending || 0}/${todos.total}` : "-"}; notifications ${(Array.isArray(rawTodos?.notifications) ? rawTodos.notifications.length : 0)}`;
+    }
+
+    function connectWs() {
+      const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${wsProto}//${host}:${location.port || "__DISPLAY_PORT__"}/state-stream`);
+      ws.onopen = () => {
+        connStateEl.textContent = "Connected";
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const state = JSON.parse(ev.data || "{}");
+          applyState(state);
+        } catch {}
+      };
+      ws.onclose = () => {
+        connStateEl.textContent = "Disconnected, retrying in 3s";
+        setTimeout(connectWs, 3000);
+      };
+      ws.onerror = () => {
+        connStateEl.textContent = "Connection error";
+      };
+    }
+
+    function pullStateOnce() {
+      fetch("/state", { cache: "no-store" })
+        .then((resp) => resp.json())
+        .then((state) => applyState(state))
+        .catch(() => {});
+    }
+
+    refreshBtn.addEventListener("click", () => {
+      refreshScreen();
+      pullStateOnce();
+    });
+
+    refreshScreen();
+    setInterval(refreshScreen, 1200);
+    pullStateOnce();
+    connectWs();
+    setInterval(pullStateOnce, 3000);
+  </script>
+</body>
+</html>

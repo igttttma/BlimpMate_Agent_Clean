@@ -1,0 +1,72 @@
+{
+  "name": "l2d-face-control",
+  "version": "0.1.0",
+  "description": "BlimpMate — quiet long-endurance flying display platform with auditable prototype AI interaction scenarios.",
+  "author": "BlimpMate",
+  "private": true,
+  "scripts": {
+    "build:web": "npm run build:renderer",
+    "build:renderer": "esbuild src/shared-web/renderer.mjs --bundle --outfile=src/shared-web/renderer.bundle.js --platform=browser --format=iife",
+    "demo": "npm run build:web && electron .",
+    "test:wake": "node src/xiaozhi/wake/__tests__/wake-coordinator.test.mjs && node src/xiaozhi/wake/__tests__/session-and-mouth.test.mjs && node src/xiaozhi/audio/__tests__/audio-capture.test.mjs",
+    "smoke:wake-web": "node scripts/wake-web-audio-smoke.mjs",
+    "xiaozhi:activate": "node scripts/xiaozhi-activate.mjs",
+    "pack": "npm run build:web && electron-builder --dir",
+    "dist": "npm run build:web && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.0",
+    "ws": "^8.21.0"
+  },
+  "main": "src/hosts/electron/main.js",
+  "build": {
+    "appId": "com.blimpmate.desktop",
+    "productName": "BlimpMate",
+    "asar": false,
+    "directories": {
+      "output": "dist-app",
+      "buildResources": "build-assets"
+    },
+    "files": [
+      "src/**/*",
+      "!src/hosts/android/**",
+      "black_origin_face/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "src/hosts/electron/main.js"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dir"
+        }
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "dir"
+      ]
+    },
+    "win": {
+      "target": [
+        "dir"
+      ]
+    }
+  },
+  "dependencies": {
+    "@pixi/core": "^7.4.3",
+    "@pixi/display": "^7.4.3",
+    "@pixi/math": "^7.4.3",
+    "@pixi/sprite": "^7.4.3",
+    "@pixi/utils": "^7.4.3",
+    "opus-decoder": "^0.7.11",
+    "opus-recorder": "^8.0.5",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^7.4.3"
+  }
+}

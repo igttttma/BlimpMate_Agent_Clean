@@ -16,8 +16,10 @@ import java.nio.ByteBuffer;
  * One viewer's session: the screen as hardware-encoded H.264 (ScreenEncoder,
  * scrcpy's approach) sent as binary packets over the agent's connection to the
  * stream server, and the viewer's taps, keys and text coming back over it.
- * All methods run on the service's session thread, except the encoder's
- * packet callback.
+ * Meanwhile a direct path (P2PLink, a WebRTC data channel) is tried; once it
+ * opens, the packets go there from the next keyframe, and back through the
+ * server if it closes. All methods run on the service's session thread,
+ * except the encoder's packet callback.
  */
 final class ScreenSession {
     private static final String TAG = "ScreenSession";
@@ -39,6 +41,9 @@ final class ScreenSession {
 
         /** A message for the viewer (ack, stats). */
         void sendToViewer(JSONObject message);
+
+        /** A WebRTC signal for the viewer (the direct path's setup). */
+        void sendSignal(JSONObject data);
 
         void onFailed(String error);
 
@@ -69,6 +74,10 @@ final class ScreenSession {
     private final Handler thread;
     private final Listener listener;
     private final ScreenEncoder encoder;
+    private final P2PLink p2p;
+    // Encoder thread: packets go over the direct path / switch to it at the next keyframe
+    private volatile boolean usingP2P;
+    private volatile boolean p2pPending;
     private Quality quality;
     private int[] frameSize;
     private boolean closed;
@@ -80,7 +89,8 @@ final class ScreenSession {
     private long lastBytes;
     private long lastStatsAt;
 
-    ScreenSession(Context context, Handler thread, MediaProjection projection, String preset, Listener listener) {
+    ScreenSession(Context context, Handler thread, MediaProjection projection, String preset,
+                  JSONArray iceServers, Listener listener) {
         this.context = context;
         this.thread = thread;
         this.listener = listener;
@@ -99,10 +109,30 @@ final class ScreenSession {
                 });
             }
         });
+        this.p2p = new P2PLink(context, thread, iceServers, new P2PLink.Listener() {
+            @Override
+            public void sendSignal(JSONObject data) {
+                if (!closed) listener.sendSignal(data);
+            }
+
+            @Override
+            public void onOpenChanged(boolean open) {
+                if (closed) return;
+                if (open) {
+                    // Switch with a keyframe, so the viewer can start decoding from it
+                    p2pPending = true;
+                } else {
+                    p2pPending = false;
+                    usingP2P = false;
+                }
+                encoder.requestKeyFrame();
+            }
+        });
     }
 
     void start() {
         restartEncoder();
+        p2p.start();
         lastStatsAt = SystemClock.elapsedRealtime();
         thread.postDelayed(statsTick, STATS_MS);
     }
@@ -112,6 +142,12 @@ final class ScreenSession {
         closed = true;
         thread.removeCallbacks(statsTick);
         encoder.release();
+        p2p.close();
+    }
+
+    /** A WebRTC signal from the viewer for the direct path. */
+    void onSignal(JSONObject data) {
+        if (!closed) p2p.onSignal(data);
     }
 
     /** The screen turned: encode the new orientation. */
@@ -141,8 +177,16 @@ final class ScreenSession {
     // ---- packets (encoder thread) ----
 
     private void onEncoded(ByteBuffer data, boolean config, boolean key, long ptsUs) {
+        // The path for this packet: direct once switched at a keyframe, the server otherwise
+        if (usingP2P && !p2p.isOpen()) usingP2P = false;
+        if (p2pPending && key && p2p.isOpen()) {
+            p2pPending = false;
+            usingP2P = true;
+        }
+        boolean direct = usingP2P;
+        long backlog = direct ? p2p.buffered() : listener.backlog();
         boolean essential = config || key;
-        if (!essential && (waitKey || listener.backlog() > MAX_BACKLOG_BYTES)) {
+        if (!essential && (waitKey || backlog > MAX_BACKLOG_BYTES)) {
             if (!waitKey) {
                 waitKey = true;
                 encoder.requestKeyFrame();
@@ -154,7 +198,15 @@ final class ScreenSession {
         packet[0] = (byte) ((config ? FLAG_CONFIG : 0) | (key ? FLAG_KEY : 0));
         ByteBuffer.wrap(packet, 1, 8).putLong(ptsUs);
         data.get(packet, 9, data.remaining());
-        if (listener.sendVideo(packet) && !config) {
+        boolean sent = direct ? p2p.send(packet) : listener.sendVideo(packet);
+        if (direct && !sent) {
+            // The direct path broke mid-packet: back through the server from a keyframe
+            usingP2P = false;
+            waitKey = true;
+            encoder.requestKeyFrame();
+            return;
+        }
+        if (sent && !config) {
             framesSent++;
             bytesSent += packet.length;
         }
@@ -174,6 +226,7 @@ final class ScreenSession {
                 listener.sendToViewer(new JSONObject()
                         .put("t", "stats")
                         .put("encoder", encoder.encoderName())
+                        .put("path", usingP2P ? "p2p" : "relay")
                         .put("fps", Math.round((frames - lastFrames) / seconds))
                         .put("kbps", Math.round((bytes - lastBytes) * 8 / 1000.0 / seconds)));
             } catch (Exception ignored) {}

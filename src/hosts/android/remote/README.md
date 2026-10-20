@@ -25,6 +25,9 @@ permission on every session, which this agent doesn't handle.
 - The video packets and the viewer's input share the one WebSocket to the stream
   server, which passes them on; the viewer decodes with WebCodecs. When the
   connection backs up, frames are dropped until the next keyframe.
+- Meanwhile `P2PLink` tries a direct path: a WebRTC data channel to the viewer
+  (only the data channel; the video stays this encoder's). When it opens, the
+  packets go there from the next keyframe; if it closes, back through the server.
 - Input goes through the accessibility service `InputService`: gestures
   (replayed with their timing), Back/Home/Recents/Notifications, and text typed
   into the focused field (native fields and web pages).

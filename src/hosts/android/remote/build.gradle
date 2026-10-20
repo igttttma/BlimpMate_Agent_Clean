@@ -63,6 +63,9 @@ android {
 dependencies {
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
+    // Prebuilt Google WebRTC (org.webrtc), only for the direct path: a data
+    // channel to the viewer that carries the H.264 packets when it connects
+    implementation "io.getstream:stream-webrtc-android:1.3.10"
 }
 
 tasks.register("syncCert", Sync) {

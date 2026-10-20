@@ -22,6 +22,7 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.concurrent.TimeUnit;
@@ -59,6 +60,8 @@ public final class RemoteService extends Service {
     private boolean connected;
     private long backoffMs = 1000;
     private Runnable reconnect;
+    // STUN/TURN servers for the direct path, from the server's welcome
+    private JSONArray iceServers = new JSONArray();
 
     private MediaProjection projection;
     private ScreenSession session;
@@ -218,6 +221,7 @@ public final class RemoteService extends Service {
             case "welcome":
                 connected = true;
                 backoffMs = 1000;
+                iceServers = msg.optJSONArray("iceServers") != null ? msg.optJSONArray("iceServers") : new JSONArray();
                 setStatus("Online");
                 sendInfo();
                 break;
@@ -232,6 +236,9 @@ public final class RemoteService extends Service {
                 break;
             case "keyframe":
                 if (session != null) session.requestKeyFrame();
+                break;
+            case "signal":
+                if (session != null && msg.optJSONObject("data") != null) session.onSignal(msg.optJSONObject("data"));
                 break;
         }
     }
@@ -304,7 +311,7 @@ public final class RemoteService extends Service {
             }
         }, handler);
         WebSocket socket = ws;
-        session = new ScreenSession(this, handler, projection, preset, new ScreenSession.Listener() {
+        session = new ScreenSession(this, handler, projection, preset, iceServers, new ScreenSession.Listener() {
             @Override
             public boolean sendVideo(byte[] packet) {
                 return socket != null && socket.send(ByteString.of(packet));
@@ -319,6 +326,13 @@ public final class RemoteService extends Service {
             public void sendToViewer(JSONObject message) {
                 try {
                     send(new JSONObject().put("type", "viewer").put("data", message));
+                } catch (Exception ignored) {}
+            }
+
+            @Override
+            public void sendSignal(JSONObject data) {
+                try {
+                    send(new JSONObject().put("type", "signal").put("data", data));
                 } catch (Exception ignored) {}
             }
 

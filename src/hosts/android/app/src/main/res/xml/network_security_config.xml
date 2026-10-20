@@ -3,6 +3,9 @@
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system"/>
+            <!-- The stream server's self-signed certificate (stream-server/certs/cert.pem).
+                 Replace this file when the server's certificate is regenerated. -->
+            <certificates src="@raw/stream_server_cert"/>
         </trust-anchors>
     </base-config>
 </network-security-config>

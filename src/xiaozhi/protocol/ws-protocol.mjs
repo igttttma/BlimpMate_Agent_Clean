@@ -248,8 +248,12 @@ export class WsProtocol extends EventTarget {
   sendStopListening() {
     return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.STOP });
   }
-  sendDetectWord(text) {
-    return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.DETECT, text });
+  // `wake: true` marks a locally detected wake word, so the server doesn't
+  // have to guess it from the text (typed chat input uses the same message).
+  sendDetectWord(text, { wake = false } = {}) {
+    const msg = { session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.DETECT, text };
+    if (wake) msg.wake = true;
+    return this._sendText(msg);
   }
   sendAbort(reason) {
     const msg = { session_id: this.sessionId, type: ClientMsg.ABORT };

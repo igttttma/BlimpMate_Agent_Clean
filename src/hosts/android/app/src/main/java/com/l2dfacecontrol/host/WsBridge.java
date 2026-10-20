@@ -144,6 +144,16 @@ public final class WsBridge {
         return true;
     }
 
+    /** Closes every socket; called when the page (re)loads so old ones don't linger. */
+    public void closeAll() {
+        for (Integer id : sockets.keySet()) {
+            WebSocket ws = sockets.remove(id);
+            if (ws != null) {
+                try { ws.cancel(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
     private void postEvent(int id, String json) {
         // Escape for JS string literal — JSON already escapes quotes & backslashes
         // but we still need to wrap it carefully. Use Base64 to avoid any quoting.

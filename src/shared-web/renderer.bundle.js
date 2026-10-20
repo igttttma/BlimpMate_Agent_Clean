@@ -10599,9 +10599,9 @@ void main(void)
         const attribute = attributes[j2], buffer = buffers[attribute.buffer], glBuffer = buffer._glBuffers[CONTEXT_UID];
         if (program.attributeData[j2]) {
           lastBuffer !== glBuffer && (bufferSystem.bind(buffer), lastBuffer = glBuffer);
-          const location = program.attributeData[j2].location;
-          if (gl.enableVertexAttribArray(location), gl.vertexAttribPointer(
-            location,
+          const location2 = program.attributeData[j2].location;
+          if (gl.enableVertexAttribArray(location2), gl.vertexAttribPointer(
+            location2,
             attribute.size,
             attribute.type || gl.FLOAT,
             attribute.normalized,
@@ -10609,7 +10609,7 @@ void main(void)
             attribute.start
           ), attribute.instance)
             if (this.hasInstance)
-              gl.vertexAttribDivisor(location, attribute.divisor);
+              gl.vertexAttribDivisor(location2, attribute.divisor);
             else
               throw new Error("geometry error, GPU Instancing is not supported on this device");
         }
@@ -12316,14 +12316,14 @@ void main(void)
      * @param texture - Texture to bind
      * @param [location=0] - Location to bind at
      */
-    bind(texture, location = 0) {
+    bind(texture, location2 = 0) {
       const { gl } = this;
       if (texture = texture?.castToBaseTexture(), texture?.valid && !texture.parentTextureArray) {
         texture.touched = this.renderer.textureGC.count;
         const glTexture = texture._glTextures[this.CONTEXT_UID] || this.initTexture(texture);
-        this.boundTextures[location] !== texture && (this.currentLocation !== location && (this.currentLocation = location, gl.activeTexture(gl.TEXTURE0 + location)), gl.bindTexture(texture.target, glTexture.texture)), glTexture.dirtyId !== texture.dirtyId ? (this.currentLocation !== location && (this.currentLocation = location, gl.activeTexture(gl.TEXTURE0 + location)), this.updateTexture(texture)) : glTexture.dirtyStyleId !== texture.dirtyStyleId && this.updateTextureStyle(texture), this.boundTextures[location] = texture;
+        this.boundTextures[location2] !== texture && (this.currentLocation !== location2 && (this.currentLocation = location2, gl.activeTexture(gl.TEXTURE0 + location2)), gl.bindTexture(texture.target, glTexture.texture)), glTexture.dirtyId !== texture.dirtyId ? (this.currentLocation !== location2 && (this.currentLocation = location2, gl.activeTexture(gl.TEXTURE0 + location2)), this.updateTexture(texture)) : glTexture.dirtyStyleId !== texture.dirtyStyleId && this.updateTextureStyle(texture), this.boundTextures[location2] = texture;
       } else
-        this.currentLocation !== location && (this.currentLocation = location, gl.activeTexture(gl.TEXTURE0 + location)), gl.bindTexture(gl.TEXTURE_2D, this.emptyTextures[gl.TEXTURE_2D].texture), this.boundTextures[location] = null;
+        this.currentLocation !== location2 && (this.currentLocation = location2, gl.activeTexture(gl.TEXTURE0 + location2)), gl.bindTexture(gl.TEXTURE_2D, this.emptyTextures[gl.TEXTURE_2D].texture), this.boundTextures[location2] = null;
     }
     /** Resets texture location and bound textures Actual `bind(null, i)` calls will be performed at next `unbind()` call */
     reset() {
@@ -17377,7 +17377,7 @@ void main()
       }
       return propagationPath.reverse(), propagationPath;
     }
-    hitTestMoveRecursive(currentTarget, eventMode, location, testFn, pruneFn, ignore = false) {
+    hitTestMoveRecursive(currentTarget, eventMode, location2, testFn, pruneFn, ignore = false) {
       let shouldReturn = false;
       if (this._interactivePrune(currentTarget))
         return null;
@@ -17387,10 +17387,10 @@ void main()
           const child = children[i2], nestedHit = this.hitTestMoveRecursive(
             child,
             this._isInteractive(eventMode) ? eventMode : child.eventMode,
-            location,
+            location2,
             testFn,
             pruneFn,
-            ignore || pruneFn(currentTarget, location)
+            ignore || pruneFn(currentTarget, location2)
           );
           if (nestedHit) {
             if (nestedHit.length > 0 && !nestedHit[nestedHit.length - 1].parent)
@@ -17401,7 +17401,7 @@ void main()
         }
       }
       const isInteractiveMode = this._isInteractive(eventMode), isInteractiveTarget = currentTarget.isInteractive();
-      return isInteractiveMode && isInteractiveTarget && this._allInteractiveElements.push(currentTarget), ignore || this._hitElements.length > 0 ? null : shouldReturn ? this._hitElements : isInteractiveMode && !pruneFn(currentTarget, location) && testFn(currentTarget, location) ? isInteractiveTarget ? [currentTarget] : [] : null;
+      return isInteractiveMode && isInteractiveTarget && this._allInteractiveElements.push(currentTarget), ignore || this._hitElements.length > 0 ? null : shouldReturn ? this._hitElements : isInteractiveMode && !pruneFn(currentTarget, location2) && testFn(currentTarget, location2) ? isInteractiveTarget ? [currentTarget] : [] : null;
     }
     /**
      * Recursive implementation for {@link PIXI.EventBoundary.hitTest hitTest}.
@@ -17417,8 +17417,8 @@ void main()
      *  is the target itself and the last is {@link PIXI.EventBoundary.rootTarget rootTarget}. This is the opposite
      *  order w.r.t. the propagation path. If no hit testing target is found, null is returned.
      */
-    hitTestRecursive(currentTarget, eventMode, location, testFn, pruneFn) {
-      if (this._interactivePrune(currentTarget) || pruneFn(currentTarget, location))
+    hitTestRecursive(currentTarget, eventMode, location2, testFn, pruneFn) {
+      if (this._interactivePrune(currentTarget) || pruneFn(currentTarget, location2))
         return null;
       if ((currentTarget.eventMode === "dynamic" || eventMode === "dynamic") && (EventsTicker.pauseUpdate = false), currentTarget.interactiveChildren && currentTarget.children) {
         const children = currentTarget.children;
@@ -17426,7 +17426,7 @@ void main()
           const child = children[i2], nestedHit = this.hitTestRecursive(
             child,
             this._isInteractive(eventMode) ? eventMode : child.eventMode,
-            location,
+            location2,
             testFn,
             pruneFn
           );
@@ -17439,7 +17439,7 @@ void main()
         }
       }
       const isInteractiveMode = this._isInteractive(eventMode), isInteractiveTarget = currentTarget.isInteractive();
-      return isInteractiveMode && testFn(currentTarget, location) ? isInteractiveTarget ? [currentTarget] : [] : null;
+      return isInteractiveMode && testFn(currentTarget, location2) ? isInteractiveTarget ? [currentTarget] : [] : null;
     }
     _isInteractive(int) {
       return int === "static" || int === "dynamic";
@@ -17455,12 +17455,12 @@ void main()
      * @param displayObject
      * @param location
      */
-    hitPruneFn(displayObject, location) {
-      if (displayObject.hitArea && (displayObject.worldTransform.applyInverse(location, tempLocalMapping), !displayObject.hitArea.contains(tempLocalMapping.x, tempLocalMapping.y)))
+    hitPruneFn(displayObject, location2) {
+      if (displayObject.hitArea && (displayObject.worldTransform.applyInverse(location2, tempLocalMapping), !displayObject.hitArea.contains(tempLocalMapping.x, tempLocalMapping.y)))
         return true;
       if (displayObject._mask) {
         const maskObject = displayObject._mask.isMaskData ? displayObject._mask.maskObject : displayObject._mask;
-        if (maskObject && !maskObject.containsPoint?.(location))
+        if (maskObject && !maskObject.containsPoint?.(location2))
           return true;
       }
       return false;
@@ -17471,8 +17471,8 @@ void main()
      * @param location
      * @returns - Whether `displayObject` passes hit testing for `location`.
      */
-    hitTestFn(displayObject, location) {
-      return displayObject.eventMode === "passive" ? false : displayObject.hitArea ? true : displayObject.containsPoint ? displayObject.containsPoint(location) : false;
+    hitTestFn(displayObject, location2) {
+      return displayObject.eventMode === "passive" ? false : displayObject.hitArea ? true : displayObject.containsPoint ? displayObject.containsPoint(location2) : false;
     }
     /**
      * Notify all the listeners to the event's `currentTarget`.
@@ -32933,7 +32933,6 @@ void main(void)\r
     APP_NAME: "l2d-face-control",
     APP_VERSION: "0.1.0",
     BOARD_TYPE: "web",
-    OTA_URL: "https://api.tenclass.net/xiaozhi/ota/",
     PROTOCOL_VERSION: "1",
     AUDIO: Object.freeze({
       INPUT_SAMPLE_RATE: 16e3,
@@ -32962,7 +32961,11 @@ void main(void)\r
     CLIENT_ID: "xiaozhi.client_id",
     ACTIVATION_STATUS: "xiaozhi.activation_status",
     WS_URL: "xiaozhi.ws_url",
-    WS_TOKEN: "xiaozhi.ws_token"
+    WS_TOKEN: "xiaozhi.ws_token",
+    // OTA URL that produced the cached WS_URL/WS_TOKEN (offline fallback).
+    WS_SOURCE_OTA: "xiaozhi.ws_source_ota",
+    // Operator-chosen backend ({ mode, url, token }); see backend-config.mjs.
+    BACKEND: "blimpmate.backend_v1"
   });
 
   // src/xiaozhi/config/device-identity.mjs
@@ -33020,16 +33023,66 @@ void main(void)\r
     return Array.from(new Uint8Array(sig), (b2) => b2.toString(16).padStart(2, "0")).join("");
   }
 
+  // src/xiaozhi/config/backend-config.mjs
+  var BackendMode = Object.freeze({ OTA: "ota", WS: "ws" });
+  function normalizeBackendConfig(cfg) {
+    const mode = cfg?.mode === BackendMode.WS ? BackendMode.WS : BackendMode.OTA;
+    const url2 = typeof cfg?.url === "string" ? cfg.url.trim() : "";
+    const token = mode === BackendMode.WS && typeof cfg?.token === "string" ? cfg.token.trim() : "";
+    return { mode, url: url2, token };
+  }
+  function validateBackendConfig(cfg) {
+    const { mode, url: url2 } = normalizeBackendConfig(cfg);
+    if (!url2) return "Enter the backend URL.";
+    if (mode === BackendMode.OTA && !/^https?:\/\/\S+$/i.test(url2)) {
+      return "An OTA URL must start with http:// or https://";
+    }
+    if (mode === BackendMode.WS && !/^wss?:\/\/\S+$/i.test(url2)) {
+      return "A websocket URL must start with ws:// or wss://";
+    }
+    return null;
+  }
+  function inferBackendMode(url2) {
+    if (/^wss?:\/\//i.test(url2 || "")) return BackendMode.WS;
+    if (/^https?:\/\//i.test(url2 || "")) return BackendMode.OTA;
+    return null;
+  }
+  function loadSavedBackendConfig(storage) {
+    const raw = storage?.get?.(STORAGE_KEYS.BACKEND);
+    if (!raw) return null;
+    try {
+      const cfg = normalizeBackendConfig(typeof raw === "string" ? JSON.parse(raw) : raw);
+      return validateBackendConfig(cfg) ? null : cfg;
+    } catch {
+      return null;
+    }
+  }
+  function saveBackendConfig(storage, cfg) {
+    const normalized = normalizeBackendConfig(cfg);
+    storage.set(STORAGE_KEYS.BACKEND, JSON.stringify(normalized));
+    return normalized;
+  }
+  function clearBackendConfig(storage) {
+    storage?.remove?.(STORAGE_KEYS.BACKEND);
+  }
+  function envBackendConfig() {
+    const env = globalThis?.xiaozhiConfig;
+    const wsUrl = typeof env?.wsUrl === "string" ? env.wsUrl.trim() : "";
+    const otaUrl = typeof env?.otaUrl === "string" ? env.otaUrl.trim() : "";
+    const cfg = wsUrl ? { mode: BackendMode.WS, url: wsUrl, token: env?.wsToken || "" } : otaUrl ? { mode: BackendMode.OTA, url: otaUrl } : null;
+    return cfg && !validateBackendConfig(cfg) ? normalizeBackendConfig(cfg) : null;
+  }
+  function resolveBackendConfig(storage) {
+    const saved = loadSavedBackendConfig(storage);
+    if (saved) return { config: saved, source: "saved" };
+    const env = envBackendConfig();
+    if (env) return { config: env, source: "env" };
+    return null;
+  }
+
   // src/xiaozhi/ota/activation.mjs
   var RETRY_INTERVAL_MS = 5e3;
   var MAX_RETRY = 60;
-  function resolveOtaUrl() {
-    const override = globalThis?.xiaozhiConfig?.otaUrl;
-    if (typeof override === "string" && override.trim()) {
-      return override.trim();
-    }
-    return APP_CONFIG.OTA_URL;
-  }
   async function postJson(url2, body, headers) {
     const res = await fetch(url2, {
       method: "POST",
@@ -33071,26 +33124,27 @@ void main(void)\r
       }
     };
   }
-  async function requestOta(storage) {
+  async function requestOta(storage, otaUrl) {
+    if (!otaUrl) throw new Error("OTA URL is not configured");
     const identity = await ensureDeviceIdentity(storage);
-    const { status, data } = await postJson(
-      resolveOtaUrl(),
-      buildOtaBody(identity),
-      buildOtaHeaders(identity)
-    );
+    let status, data;
+    try {
+      ({ status, data } = await postJson(otaUrl, buildOtaBody(identity), buildOtaHeaders(identity)));
+    } catch (err) {
+      throw new Error(`Cannot reach OTA endpoint ${otaUrl} (${err?.message || err})`);
+    }
     if (status !== 200 || !data) {
-      throw new Error(`OTA HTTP ${status}`);
+      throw new Error(`OTA endpoint ${otaUrl} returned HTTP ${status}`);
     }
     if (data.websocket && data.websocket.url) {
       storage.set(STORAGE_KEYS.WS_URL, data.websocket.url);
-      if (data.websocket.token) {
-        storage.set(STORAGE_KEYS.WS_TOKEN, data.websocket.token);
-      }
+      storage.set(STORAGE_KEYS.WS_TOKEN, data.websocket.token || "");
+      storage.set(STORAGE_KEYS.WS_SOURCE_OTA, otaUrl);
       storage.set(STORAGE_KEYS.ACTIVATION_STATUS, "activated");
     }
     return { identity, response: data };
   }
-  async function performActivation(storage, activation, onProgress) {
+  async function performActivation(storage, otaUrl, activation, onProgress) {
     const identity = await ensureDeviceIdentity(storage);
     const headers = buildOtaHeaders(identity);
     const challenge = activation.challenge;
@@ -33104,7 +33158,7 @@ void main(void)\r
         hmac
       }
     };
-    const url2 = resolveOtaUrl().replace(/\/$/, "") + "/activate";
+    const url2 = otaUrl.replace(/\/$/, "") + "/activate";
     for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
       if (onProgress) onProgress({ attempt, code: activation.code, message: activation.message });
       const { status } = await postJson(url2, body, headers);
@@ -33119,45 +33173,44 @@ void main(void)\r
     }
     throw new Error("Activation timed out");
   }
-  async function ensureActivated(storage, onActivationRequired) {
-    const injectedWs = globalThis?.xiaozhiConfig?.wsUrl;
-    if (typeof injectedWs === "string" && injectedWs.trim()) {
-      const wsUrl = injectedWs.trim();
-      const wsToken = globalThis?.xiaozhiConfig?.wsToken || storage.get(STORAGE_KEYS.WS_TOKEN) || "";
-      storage.set(STORAGE_KEYS.WS_URL, wsUrl);
-      if (wsToken) storage.set(STORAGE_KEYS.WS_TOKEN, wsToken);
-      storage.set(STORAGE_KEYS.ACTIVATION_STATUS, "activated");
-      return { wsUrl, wsToken, alreadyActivated: true, injected: true };
+  async function ensureActivated(storage, backend, onActivationRequired) {
+    if (!backend || !backend.url) throw new Error("No backend configured");
+    if (backend.mode === BackendMode.WS) {
+      return { wsUrl: backend.url, wsToken: backend.token || "", alreadyActivated: true };
     }
-    const cachedWs = storage.get(STORAGE_KEYS.WS_URL);
-    const cachedToken = storage.get(STORAGE_KEYS.WS_TOKEN);
-    const cachedStatus = storage.get(STORAGE_KEYS.ACTIVATION_STATUS);
-    if (cachedWs && cachedToken && cachedStatus === "activated") {
-      return { wsUrl: cachedWs, wsToken: cachedToken, alreadyActivated: true };
+    const otaUrl = backend.url;
+    let response;
+    try {
+      ({ response } = await requestOta(storage, otaUrl));
+    } catch (err) {
+      const cachedWs = storage.get(STORAGE_KEYS.WS_URL);
+      if (cachedWs && storage.get(STORAGE_KEYS.WS_SOURCE_OTA) === otaUrl) {
+        return { wsUrl: cachedWs, wsToken: storage.get(STORAGE_KEYS.WS_TOKEN) || "", alreadyActivated: true, cached: true };
+      }
+      throw err;
     }
-    const { response } = await requestOta(storage);
     if (response.activation) {
       if (onActivationRequired) {
         await onActivationRequired(response.activation, async (progressCb) => {
-          await performActivation(storage, response.activation, progressCb);
+          await performActivation(storage, otaUrl, response.activation, progressCb);
         });
       } else {
-        await performActivation(storage, response.activation);
+        await performActivation(storage, otaUrl, response.activation);
       }
-      const second = await requestOta(storage);
+      const second = await requestOta(storage, otaUrl);
       if (!second.response.websocket || !second.response.websocket.url) {
         throw new Error("Activation succeeded but no websocket URL");
       }
       return {
         wsUrl: second.response.websocket.url,
-        wsToken: second.response.websocket.token,
+        wsToken: second.response.websocket.token || "",
         alreadyActivated: false
       };
     }
     if (response.websocket && response.websocket.url) {
       return {
         wsUrl: response.websocket.url,
-        wsToken: response.websocket.token,
+        wsToken: response.websocket.token || "",
         alreadyActivated: true
       };
     }
@@ -33441,8 +33494,12 @@ void main(void)\r
     sendStopListening() {
       return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.STOP });
     }
-    sendDetectWord(text) {
-      return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.DETECT, text });
+    // `wake: true` marks a locally detected wake word, so the server doesn't
+    // have to guess it from the text (typed chat input uses the same message).
+    sendDetectWord(text, { wake = false } = {}) {
+      const msg = { session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.DETECT, text };
+      if (wake) msg.wake = true;
+      return this._sendText(msg);
     }
     sendAbort(reason) {
       const msg = { session_id: this.sessionId, type: ClientMsg.ABORT };
@@ -34335,10 +34392,73 @@ void main(void)\r
     });
   }
 
+  // src/xiaozhi/mcp/tools/camera.mjs
+  var MAX_SIDE = 768;
+  var JPEG_QUALITY = 0.75;
+  var SETTLE_MS = 500;
+  async function capturePhoto({ facing = "user", maxSide = MAX_SIDE } = {}) {
+    const media = globalThis.navigator?.mediaDevices;
+    if (!media?.getUserMedia) throw new Error("Camera is not available on this device");
+    const stream = await media.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    try {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await video.play();
+      await new Promise((resolve2) => setTimeout(resolve2, SETTLE_MS));
+      const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+      const width = Math.round(video.videoWidth * scale);
+      const height = Math.round(video.videoHeight * scale);
+      if (!width || !height) throw new Error("Camera returned no frames");
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(video, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+      return { data: dataUrl.slice(dataUrl.indexOf(",") + 1), mimeType: "image/jpeg", width, height };
+    } finally {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+  }
+  function registerCameraTools(server, { capture = capturePhoto } = {}) {
+    server.registerTool({
+      name: "camera.take_photo",
+      description: "Take a photo with the device camera to see the user or the surroundings. Call this when the user asks you to look at something, what you can see, how they look, or what they are holding. The photo is attached to the conversation; answer from it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "What to look for in the photo"
+          },
+          camera: {
+            type: "string",
+            enum: ["front", "back"],
+            description: "front faces the user (default); back faces away, on devices that have one"
+          }
+        }
+      },
+      handler: async ({ question = "", camera = "front" } = {}) => {
+        const photo = await capture({ facing: camera === "back" ? "environment" : "user" });
+        return {
+          content: [
+            { type: "text", text: `Photo taken (${photo.width}x${photo.height})${question ? ` for: ${question}` : ""}.` },
+            { type: "image", data: photo.data, mimeType: photo.mimeType }
+          ]
+        };
+      }
+    });
+  }
+
   // src/xiaozhi/mcp/tools/index.mjs
   function registerAllTools(mcp, bridge, sessionControl = {}) {
     registerSelfControlTools(mcp, bridge);
     registerSessionControlTools(mcp, sessionControl);
+    registerCameraTools(mcp);
   }
 
   // src/xiaozhi/conversation/conversation.mjs
@@ -34372,6 +34492,9 @@ void main(void)\r
       this._initialized = false;
       this._sendingFrames = false;
       this._autoSessionActive = false;
+      this.bargeIn = false;
+      this._listenThroughReplies = false;
+      this._ttsTurn = false;
       this._sttText = "";
       this._ttsText = "";
       this._connectionState = {
@@ -34464,7 +34587,7 @@ void main(void)\r
       });
       this.player = new AudioPlayer({ workletUrl: this.assetUrls.playbackWorklet });
       this.player.onRms((rms) => {
-        this.mouth.feedRms(rms);
+        if (this._ttsTurn) this.mouth.feedRms(rms);
       });
       await this.player.start();
       this.mcp.setSender((payload) => {
@@ -34554,7 +34677,7 @@ void main(void)\r
       }
       await this.stopListening();
       if (this.player) this.player.clear();
-      this.mouth.end();
+      this._endTtsMouth();
       this.state.setDevice(DeviceState.IDLE);
       if (disconnect) await this.disconnect();
       this._emitLog("info", "session ended; wake word remains active");
@@ -34571,7 +34694,7 @@ void main(void)\r
         this._sendingFrames = false;
         await this.stopListening();
         if (this.player) this.player.clear();
-        this.mouth.end();
+        this._endTtsMouth();
         this.state.setDevice(DeviceState.IDLE);
         this._emitLog("warn", "remote session ended; returning to wake-word mode", {
           code: detail?.code,
@@ -34632,7 +34755,7 @@ void main(void)\r
             return false;
           }
         }
-        const reported = await this.sendText(word);
+        const reported = await this.sendText(word, { wake: true });
         if (!reported) {
           this._emitLog("warn", "wake-word report failed; continuing with microphone", { word });
         }
@@ -34692,10 +34815,14 @@ void main(void)\r
       this.vad.reset();
       this._sendingFrames = true;
       if (mode === ListeningMode.AUTO_STOP) this._autoSessionActive = true;
+      this._listenThroughReplies = mode === ListeningMode.AUTO_STOP && this.bargeIn === true;
+      if (this._listenThroughReplies) this._emitLog("info", "interrupt on: listening while the AI speaks");
       this.state.setMode(mode);
-      this.state.setDevice(DeviceState.LISTENING);
+      if (!(this._listenThroughReplies && this.state.device === DeviceState.SPEAKING)) {
+        this.state.setDevice(DeviceState.LISTENING);
+      }
       this.protocol.sendStartListening(
-        mode === ListeningMode.AUTO_STOP ? "auto" : mode === ListeningMode.REALTIME ? "realtime" : "manual"
+        this._listenThroughReplies || mode === ListeningMode.REALTIME ? "realtime" : mode === ListeningMode.AUTO_STOP ? "auto" : "manual"
       );
       return true;
     }
@@ -34703,6 +34830,7 @@ void main(void)\r
       console.log("[audio] stopListening, frames=" + this._dbgFrames + " packets=" + this._dbgPackets + " sent=" + this._dbgSent);
       this._emitLog("info", "stop listening");
       this._sendingFrames = false;
+      this._listenThroughReplies = false;
       if (this.encoder) await this.encoder.flush();
       if (this.protocol?.isOpen?.()) this.protocol.sendStopListening();
       if (this.capture) await this.capture.stop("conversation");
@@ -34710,7 +34838,7 @@ void main(void)\r
         this.state.setDevice(DeviceState.IDLE);
       }
     }
-    async sendText(text) {
+    async sendText(text, { wake = false } = {}) {
       const normalizedText = typeof text === "string" ? text.trim() : "";
       if (!normalizedText) {
         this._emitLog("warn", "send text skipped: empty input");
@@ -34742,7 +34870,7 @@ void main(void)\r
           }
         }
         try {
-          const sent = await this.protocol.sendDetectWord(normalizedText);
+          const sent = await this.protocol.sendDetectWord(normalizedText, { wake });
           if (!sent) throw new Error("websocket send failed");
           this._emitLog("info", "send text", { text: normalizedText, attempt });
           return true;
@@ -34767,12 +34895,20 @@ void main(void)\r
       }
       return false;
     }
+    _beginTtsMouth() {
+      this._ttsTurn = true;
+      this.mouth.begin();
+    }
+    _endTtsMouth() {
+      this._ttsTurn = false;
+      this.mouth.end();
+    }
     async abort(reason = AbortReason.USER_INTERRUPTION) {
       if (!this.protocol) return;
       this._emitLog("warn", "abort", { reason });
       this.protocol.sendAbort(reason);
       if (this.player) this.player.clear();
-      this.mouth.end();
+      this._endTtsMouth();
       this.state.setAborted(true);
       if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
     }
@@ -34782,16 +34918,19 @@ void main(void)\r
       if (type === "tts") {
         const st = msg.state;
         if (st === "start") {
-          if (this.state.mode === ListeningMode.AUTO_STOP && this.state.device === DeviceState.LISTENING) {
+          if (this.state.mode === ListeningMode.AUTO_STOP && this.state.device === DeviceState.LISTENING && !this._listenThroughReplies) {
             this.stopListening().catch(() => {
             });
           }
           this.state.setDevice(DeviceState.SPEAKING);
-          this.mouth.begin();
+          this._beginTtsMouth();
           if (this.player) this.player.resume();
         } else if (st === "stop") {
-          this.mouth.end();
-          if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
+          this._endTtsMouth();
+          if (this._listenThroughReplies && this._sendingFrames) {
+            if (this.player) this.player.clear();
+            this.state.setDevice(DeviceState.LISTENING);
+          } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
             this.state.setDevice(DeviceState.IDLE);
             this.startListening(ListeningMode.AUTO_STOP).catch((e2) => console.warn("[audio] auto re-listen failed:", e2));
           } else {
@@ -34847,17 +34986,144 @@ void main(void)\r
   };
 
   // src/xiaozhi/index.mjs
-  async function createXiaozhiAgent({ bridge, assetUrls: assetUrls2, onActivationRequired }) {
+  async function createXiaozhiAgent({ bridge, assetUrls: assetUrls2, backend, onActivationRequired }) {
     const storage = bridge.storage;
     const identity = await ensureDeviceIdentity(storage);
-    const { wsUrl, wsToken } = await ensureActivated(storage, onActivationRequired);
+    const { wsUrl, wsToken } = await ensureActivated(storage, backend, onActivationRequired);
     const conversation = new Conversation({ bridge, identity, wsUrl, wsToken, assetUrls: assetUrls2 });
     await conversation.init();
     return { conversation, identity };
   }
 
+  // src/shared-web/ui/backend-config-ui.mjs
+  var PLACEHOLDERS = {
+    [BackendMode.OTA]: "http://127.0.0.1:8003/xiaozhi/ota/",
+    [BackendMode.WS]: "ws://127.0.0.1:8000/xiaozhi/v1/"
+  };
+  function createBackendForm() {
+    const el = document.createElement("div");
+    el.className = "xz-backend-form";
+    el.innerHTML = `
+    <div class="xz-row xz-backend-modes" role="radiogroup" aria-label="Backend type">
+      <button type="button" class="xz-btn" data-mode="${BackendMode.OTA}">OTA</button>
+      <button type="button" class="xz-btn" data-mode="${BackendMode.WS}">WebSocket</button>
+    </div>
+    <div class="xz-backend-hint"></div>
+    <input type="text" class="xz-input" data-field="url" spellcheck="false" autocomplete="off" />
+    <input type="text" class="xz-input" data-field="token" spellcheck="false" autocomplete="off"
+           placeholder="Token (optional)" />
+    <div class="xz-backend-error" role="alert"></div>
+  `;
+    const modeButtons = [...el.querySelectorAll("[data-mode]")];
+    const urlInput = el.querySelector('[data-field="url"]');
+    const tokenInput = el.querySelector('[data-field="token"]');
+    const hintEl = el.querySelector(".xz-backend-hint");
+    const errorEl = el.querySelector(".xz-backend-error");
+    let mode = BackendMode.OTA;
+    let onSubmit = null;
+    const setMode = (next) => {
+      mode = next === BackendMode.WS ? BackendMode.WS : BackendMode.OTA;
+      modeButtons.forEach((b2) => {
+        const on = b2.dataset.mode === mode;
+        b2.classList.toggle("xz-active", on);
+        b2.setAttribute("aria-checked", String(on));
+      });
+      urlInput.placeholder = PLACEHOLDERS[mode];
+      tokenInput.hidden = mode !== BackendMode.WS;
+      hintEl.textContent = mode === BackendMode.OTA ? "The server's OTA endpoint provides the websocket address, and may ask to bind this device." : "Connect straight to a known websocket address.";
+    };
+    const showError = (msg) => {
+      errorEl.textContent = msg || "";
+      errorEl.hidden = !msg;
+    };
+    modeButtons.forEach((b2) => b2.addEventListener("click", () => {
+      setMode(b2.dataset.mode);
+      showError("");
+    }));
+    urlInput.addEventListener("input", () => {
+      const guessed = inferBackendMode(urlInput.value.trim());
+      if (guessed && guessed !== mode) setMode(guessed);
+      showError("");
+    });
+    [urlInput, tokenInput].forEach((input) => input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && onSubmit) onSubmit();
+    }));
+    setMode(BackendMode.OTA);
+    showError("");
+    return {
+      el,
+      getValue() {
+        return normalizeBackendConfig({ mode, url: urlInput.value, token: tokenInput.value });
+      },
+      setValue(cfg) {
+        const c2 = normalizeBackendConfig(cfg || {});
+        setMode(cfg ? c2.mode : BackendMode.OTA);
+        urlInput.value = c2.url;
+        tokenInput.value = c2.token;
+        showError("");
+      },
+      // Returns the config when valid; otherwise shows why and returns null.
+      validate() {
+        const cfg = this.getValue();
+        const err = validateBackendConfig(cfg);
+        showError(err);
+        if (err) urlInput.focus();
+        return err ? null : cfg;
+      },
+      showError,
+      focus() {
+        urlInput.focus();
+      },
+      onSubmit(cb) {
+        onSubmit = cb;
+      }
+    };
+  }
+  function createBackendSetupDialog() {
+    const overlay = document.createElement("div");
+    overlay.className = "xz-overlay";
+    overlay.style.display = "none";
+    overlay.innerHTML = `
+    <div class="xz-dialog xz-backend-dialog">
+      <div class="xz-dialog-title">Connect to a backend</div>
+      <div class="xz-dialog-msg"></div>
+      <div class="xz-backend-slot"></div>
+      <div class="xz-dialog-row">
+        <button type="button" class="xz-btn xz-btn-primary" data-action="save">Save and connect</button>
+      </div>
+    </div>
+  `;
+    document.body.appendChild(overlay);
+    const msgEl = overlay.querySelector(".xz-dialog-msg");
+    const form = createBackendForm();
+    overlay.querySelector(".xz-backend-slot").appendChild(form.el);
+    const saveBtn = overlay.querySelector('[data-action="save"]');
+    return {
+      // Resolves with a validated { mode, url, token } once the operator saves.
+      ask({ initial = null, message = "", error = "" } = {}) {
+        msgEl.textContent = message || "No backend is configured yet. Choose how this client reaches the xiaozhi server.";
+        form.setValue(initial);
+        if (error) form.showError(error);
+        overlay.style.display = "flex";
+        setTimeout(() => form.focus(), 0);
+        return new Promise((resolve2) => {
+          const submit = () => {
+            const cfg = form.validate();
+            if (!cfg) return;
+            saveBtn.removeEventListener("click", submit);
+            form.onSubmit(null);
+            overlay.style.display = "none";
+            resolve2(cfg);
+          };
+          saveBtn.addEventListener("click", submit);
+          form.onSubmit(submit);
+        });
+      }
+    };
+  }
+
   // src/shared-web/ui/chat-panel.mjs
-  function createChatPanel({ onConnect, onDisconnect, onPress, onRelease, onAutoToggle, onAbort, onEndSession, onSendText, onModeChange }) {
+  function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onEndSession, onSendText, onModeChange }) {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "xz-panel-toggle";
@@ -34886,6 +35152,27 @@ void main(void)\r
       <div class="xz-row">
         <button type="button" class="xz-btn" id="xzConnect">Connect</button>
         <button type="button" class="xz-btn" id="xzDisconnect">Disconnect</button>
+      </div>
+
+      <div class="xz-section">
+        <div class="xz-section-label">Backend<span class="xz-backend-source" id="xzBackendSource"></span></div>
+        <div id="xzBackendSlot"></div>
+        <div class="xz-row" style="margin-top: 8px;">
+          <button type="button" class="xz-btn" id="xzBackendApply">Apply</button>
+          <button type="button" class="xz-btn" id="xzBackendReset" title="Forget the saved backend">Reset</button>
+        </div>
+      </div>
+
+      <div class="xz-section">
+        <div class="xz-section-label">Video calls<span class="xz-backend-source" id="xzCallStatus"></span></div>
+        <input type="text" class="xz-input" id="xzCallUrl" spellcheck="false" autocomplete="off"
+               placeholder="wss://203.0.113.7:8443/ws (empty = off)" />
+        <input type="text" class="xz-input" id="xzCallToken" spellcheck="false" autocomplete="off"
+               placeholder="Blimp token" />
+        <div class="xz-backend-error" id="xzCallError" role="alert" hidden></div>
+        <div class="xz-row" style="margin-top: 8px;">
+          <button type="button" class="xz-btn" id="xzCallApply">Apply</button>
+        </div>
       </div>
 
       <div class="xz-section">
@@ -34966,6 +35253,10 @@ void main(void)\r
     const modeManual = $2("xzModeManual");
     const modeAuto = $2("xzModeAuto");
     const textInput = $2("xzTextInput");
+    const backendForm = createBackendForm();
+    $2("xzBackendSlot").appendChild(backendForm.el);
+    const backendSourceEl = $2("xzBackendSource");
+    const backendResetBtn = $2("xzBackendReset");
     const displayPageEl = $2("xzDisplayPage");
     const displaySubtitleEl = $2("xzDisplaySubtitle");
     const displayCardEl = $2("xzDisplayCard");
@@ -35012,6 +35303,19 @@ void main(void)\r
       panel2.hidden = true;
     });
     $2("xzConnect").addEventListener("click", () => onConnect && onConnect());
+    const applyBackend = () => {
+      const cfg = backendForm.validate();
+      if (cfg && onBackendApply) onBackendApply(cfg);
+    };
+    backendForm.onSubmit(applyBackend);
+    $2("xzBackendApply").addEventListener("click", applyBackend);
+    backendResetBtn.addEventListener("click", () => onBackendReset && onBackendReset());
+    const callErrorEl = $2("xzCallError");
+    $2("xzCallApply").addEventListener("click", () => {
+      const error = onCallApply ? onCallApply({ url: $2("xzCallUrl").value, token: $2("xzCallToken").value }) : null;
+      callErrorEl.textContent = error || "";
+      callErrorEl.hidden = !error;
+    });
     $2("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
     $2("xzAbort").addEventListener("click", () => onAbort && onAbort());
     const endSessionBtn = document.createElement("button");
@@ -35112,6 +35416,23 @@ void main(void)\r
       },
       setDeviceId(id) {
         deviceIdEl.textContent = id || "";
+      },
+      // source: "saved" (chosen in the UI), "env" (Electron .env) or null.
+      setBackend(config2, source = null) {
+        backendForm.setValue(config2);
+        backendSourceEl.textContent = source === "saved" ? "(saved)" : source === "env" ? "(from .env)" : "";
+        backendResetBtn.disabled = source !== "saved";
+      },
+      showBackendError(msg) {
+        backendForm.showError(msg);
+      },
+      setCallConfig(cfg) {
+        $2("xzCallUrl").value = cfg?.url || "";
+        $2("xzCallToken").value = cfg?.token || "";
+      },
+      setCallStatus(s2) {
+        const text = !s2 || s2.state === "off" ? s2?.connected === false ? "(not connected)" : "(off)" : s2.state === "idle" ? `(remote ${s2.remote})` : `(${s2.state.replace("_", " ")})`;
+        $2("xzCallStatus").textContent = text;
       },
       setDisplayState(state = {}) {
         const page = typeof state.page === "string" ? state.page : "avatar";
@@ -35396,7 +35717,7 @@ void main(void)\r
   }
 
   // src/shared-web/ui/activation-dialog.mjs
-  var ACTIVATION_URL = "xiaozhi.me";
+  var withScheme = (u2) => /^[a-z]+:\/\//i.test(u2) ? u2 : `https://${u2}`;
   function createActivationDialog() {
     const overlay = document.createElement("div");
     overlay.className = "xz-overlay";
@@ -35409,7 +35730,7 @@ void main(void)\r
         <button type="button" class="xz-btn xz-btn-sm" id="xzCopyUrlBtn">Copy link</button>
       </div>
       <div class="xz-dialog-code" id="xzActivationCode"></div>
-      <div class="xz-dialog-hint">Open the link above and enter the code to finish pairing.<br/>This dialog closes after activation succeeds.</div>
+      <div class="xz-dialog-hint">Enter this code in your server's device console to finish pairing.<br/>This dialog closes after activation succeeds.</div>
       <div class="xz-dialog-progress" id="xzActivationProgress"></div>
       <div class="xz-dialog-error" id="xzActivationError" style="display:none;color:#f87171;font-size:13px;margin-top:6px"></div>
       <div class="xz-dialog-row">
@@ -35433,9 +35754,10 @@ void main(void)\r
     let onCancel = null;
     let onDone = null;
     let onRetry = null;
-    let verificationUrl = ACTIVATION_URL;
+    let verificationUrl = null;
     copyUrlBtn.addEventListener("click", () => {
-      const url2 = `https://${verificationUrl}`;
+      if (!verificationUrl) return;
+      const url2 = withScheme(verificationUrl);
       if (navigator.clipboard) {
         navigator.clipboard.writeText(url2).then(() => {
           copyUrlBtn.textContent = "Copied";
@@ -35465,11 +35787,11 @@ void main(void)\r
     }
     return {
       show(activation) {
-        verificationUrl = activation.url || activation.verification_url || ACTIVATION_URL;
+        verificationUrl = activation.url || activation.verification_url || null;
         msgEl.textContent = activation.message || "Follow the instructions to activate";
         codeEl.textContent = activation.code || "------";
-        urlEl.textContent = `https://${verificationUrl}`;
-        urlRow.style.display = "flex";
+        urlEl.textContent = verificationUrl ? withScheme(verificationUrl) : "";
+        urlRow.style.display = verificationUrl ? "flex" : "none";
         progressEl.textContent = "Waiting for activation...";
         errorEl.style.display = "none";
         retryBtn.style.display = "none";
@@ -35707,6 +36029,1593 @@ void main(void)\r
       return status;
     }
   };
+
+  // src/videochat/call-client.mjs
+  var DEFAULT_MEDIA = {
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } }
+  };
+  var CallClient = class extends EventTarget {
+    /**
+     * @param {object} opts
+     * @param {string} opts.url  wss://host/ws?role=remote  (or role=blimp&token=…)
+     * @param {() => Promise<MediaStream>} [opts.getMedia]  override media capture
+     * @param {number} [opts.disconnectGraceMs]  end the call after ICE stays disconnected this long
+     */
+    constructor({ url: url2, getMedia, disconnectGraceMs = 1e4 }) {
+      super();
+      this.url = url2;
+      this.getMedia = getMedia || (() => navigator.mediaDevices.getUserMedia(DEFAULT_MEDIA));
+      this.disconnectGraceMs = disconnectGraceMs;
+      this.ws = null;
+      this.connected = false;
+      this.iceServers = [];
+      this.presence = { blimp: "offline", remote: "offline" };
+      this.call = { state: "idle" };
+      this.pc = null;
+      this.localStream = null;
+      this.remoteStream = null;
+      this._mediaPromise = null;
+      this._pendingCandidates = [];
+      this._signalChain = Promise.resolve();
+      this._disconnectTimer = null;
+      this._reconnectDelay = 500;
+      this._closed = false;
+    }
+    // ---- signaling connection ----
+    connect() {
+      this._closed = false;
+      const ws = new WebSocket(this.url);
+      this.ws = ws;
+      ws.onopen = () => {
+        this._reconnectDelay = 500;
+        this._setConnected(true);
+      };
+      ws.onmessage = (e2) => {
+        let msg;
+        try {
+          msg = JSON.parse(e2.data);
+        } catch {
+          return;
+        }
+        this._onMessage(msg);
+      };
+      ws.onclose = (e2) => {
+        if (this.ws !== ws) return;
+        this.ws = null;
+        this._setConnected(false, e2.reason || `closed (${e2.code})`);
+        this._teardownMedia();
+        this._setCall({ state: "idle", reason: this.call.state === "idle" ? void 0 : "connection_lost" });
+        if (e2.code === 4001) return this._emit("error", { error: "unauthorized" });
+        if (e2.code === 4002) return this._emit("error", { error: "replaced" });
+        if (!this._closed) {
+          setTimeout(() => !this._closed && this.connect(), this._reconnectDelay);
+          this._reconnectDelay = Math.min(this._reconnectDelay * 2, 5e3);
+        }
+      };
+    }
+    close() {
+      this._closed = true;
+      this._teardownMedia();
+      if (this.ws) {
+        const ws = this.ws;
+        this.ws = null;
+        ws.close(1e3, "client closed");
+      }
+      this._setConnected(false, "client closed");
+    }
+    // ---- call control ----
+    invite() {
+      return this._send({ type: "invite" });
+    }
+    accept() {
+      return this._send({ type: "accept" });
+    }
+    decline() {
+      return this._send({ type: "decline" });
+    }
+    hangup() {
+      return this._send({ type: "hangup" });
+    }
+    /** Optional: capture media early (e.g. on a button press, to get the permission prompt in). */
+    ensureMedia() {
+      if (!this._mediaPromise) {
+        this._mediaPromise = this.getMedia().then((stream) => {
+          this.localStream = stream;
+          this._emit("local-stream", stream);
+          return stream;
+        });
+        this._mediaPromise.catch(() => {
+          this._mediaPromise = null;
+        });
+      }
+      return this._mediaPromise;
+    }
+    /** Stop media captured with ensureMedia() when no call follows (e.g. the invite failed). */
+    releaseMedia() {
+      if (this.call.state === "idle") this._teardownMedia();
+    }
+    setMicEnabled(on) {
+      for (const t2 of this.localStream?.getAudioTracks() || []) t2.enabled = on;
+    }
+    setCameraEnabled(on) {
+      for (const t2 of this.localStream?.getVideoTracks() || []) t2.enabled = on;
+    }
+    // ---- internals ----
+    _emit(type, detail) {
+      this.dispatchEvent(new CustomEvent(type, { detail }));
+    }
+    _send(msg) {
+      if (this.ws?.readyState !== WebSocket.OPEN) return false;
+      this.ws.send(JSON.stringify(msg));
+      return true;
+    }
+    _setConnected(v2, reason) {
+      if (this.connected === v2) return;
+      this.connected = v2;
+      this._emit("status", { connected: v2, reason });
+    }
+    _setCall(view) {
+      const prev = this.call;
+      this.call = view;
+      if (prev.state !== view.state || view.reason) this._emit("call", { ...view, previous: prev.state });
+    }
+    _onMessage(msg) {
+      switch (msg.type) {
+        case "welcome":
+          this.role = msg.role;
+          this.iceServers = msg.iceServers || [];
+          this.ringSeconds = msg.ringSeconds;
+          this._emit("welcome", msg);
+          break;
+        case "waiting":
+          this._emit("waiting", msg);
+          break;
+        case "presence":
+          this.presence = { blimp: msg.blimp, remote: msg.remote };
+          this._emit("presence", this.presence);
+          break;
+        case "call":
+          if (msg.state === "in_call" && this.call.state !== "in_call") {
+            this._setCall(msg);
+            this._startPeer(msg.offerer).catch((err) => this._fail("media", err));
+          } else if (msg.state === "idle") {
+            this._teardownMedia();
+            this._setCall(msg);
+          } else {
+            this._setCall(msg);
+          }
+          break;
+        case "signal":
+          this._signalChain = this._signalChain.then(() => this._onSignal(msg.data)).catch((err) => this._fail("signal", err));
+          break;
+        case "error":
+          this._emit("error", msg);
+          break;
+      }
+    }
+    async _startPeer(offerer) {
+      const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+      this.pc = pc;
+      this.remoteStream = new MediaStream();
+      pc.ontrack = (e2) => {
+        this.remoteStream.addTrack(e2.track);
+        this._emit("remote-stream", this.remoteStream);
+      };
+      pc.onicecandidate = (e2) => {
+        if (e2.candidate) this._send({ type: "signal", data: { candidate: e2.candidate.toJSON() } });
+      };
+      pc.onconnectionstatechange = () => this._onConnectionState(pc);
+      this._peerReady = (async () => {
+        const stream = await this.ensureMedia();
+        if (this.pc !== pc) return;
+        for (const track of stream.getTracks()) pc.addTrack(track, stream);
+      })();
+      await this._peerReady;
+      if (offerer && this.pc === pc) {
+        await pc.setLocalDescription(await pc.createOffer());
+        this._send({ type: "signal", data: { description: pc.localDescription.toJSON() } });
+      }
+    }
+    async _onSignal(data) {
+      if (!this.pc) return;
+      await this._peerReady;
+      const pc = this.pc;
+      if (!pc) return;
+      if (data.description) {
+        await pc.setRemoteDescription(data.description);
+        for (const c2 of this._pendingCandidates.splice(0)) await pc.addIceCandidate(c2).catch(() => {
+        });
+        if (data.description.type === "offer") {
+          await pc.setLocalDescription(await pc.createAnswer());
+          this._send({ type: "signal", data: { description: pc.localDescription.toJSON() } });
+        }
+      } else if (data.candidate) {
+        if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {
+        });
+        else this._pendingCandidates.push(data.candidate);
+      }
+    }
+    _onConnectionState(pc) {
+      if (this.pc !== pc) return;
+      this._emit("connection", { state: pc.connectionState });
+      clearTimeout(this._disconnectTimer);
+      if (pc.connectionState === "failed") {
+        this._fail("ice", new Error("connection failed"));
+      } else if (pc.connectionState === "disconnected") {
+        this._disconnectTimer = setTimeout(() => {
+          if (this.pc === pc && pc.connectionState !== "connected") this._fail("ice", new Error("connection lost"));
+        }, this.disconnectGraceMs);
+      }
+    }
+    _fail(stage, err) {
+      this._emit("error", { error: `${stage}: ${err?.message || err}` });
+      this.hangup();
+      this._teardownMedia();
+    }
+    _teardownMedia() {
+      clearTimeout(this._disconnectTimer);
+      if (this.pc) {
+        this.pc.ontrack = this.pc.onicecandidate = this.pc.onconnectionstatechange = null;
+        try {
+          this.pc.close();
+        } catch {
+        }
+        this.pc = null;
+      }
+      this._peerReady = null;
+      this._pendingCandidates = [];
+      if (this.localStream) {
+        for (const t2 of this.localStream.getTracks()) t2.stop();
+        this.localStream = null;
+        this._emit("local-stream", null);
+      }
+      this._mediaPromise = null;
+      if (this.remoteStream) {
+        this.remoteStream = null;
+        this._emit("remote-stream", null);
+      }
+    }
+  };
+
+  // src/videochat/call-view.mjs
+  var STYLE = `
+.bm-call { position: fixed; inset: 0; z-index: 900; display: none; overflow: hidden; color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+.bm-call[data-mode]:not([data-mode="hidden"]) { display: block; }
+
+/* ---- ringing / calling / ended: a phone-call screen ---- */
+.bm-call-screen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  gap: 7vw; padding: 6vh 6vw; background: radial-gradient(120% 140% at 25% 30%, #24324a 0%, #0f1520 55%, #07090d 100%); }
+.bm-call[data-mode="ringing"] .bm-call-screen { background: radial-gradient(120% 140% at 25% 30%, #1d4a3a 0%, #0d1c17 55%, #060a08 100%); }
+.bm-call[data-mode="ended"] .bm-call-screen { background: radial-gradient(120% 140% at 25% 30%, #3a2228 0%, #170e10 55%, #080506 100%); }
+.bm-call[data-mode="in_call"] .bm-call-screen { display: none; }
+
+.bm-call-avatar { position: relative; flex: none; width: 46vh; height: 46vh; }
+.bm-call-avatar-core { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(145deg, #4c6fff, #7c4dff); box-shadow: 0 2vh 6vh rgba(0,0,0,.45); }
+.bm-call[data-mode="ringing"] .bm-call-avatar-core { background: linear-gradient(145deg, #22c55e, #0ea5a4); }
+.bm-call[data-mode="ended"] .bm-call-avatar-core { background: linear-gradient(145deg, #6b7280, #374151); }
+.bm-call-avatar svg { width: 56%; height: 56%; fill: rgba(255,255,255,.95); }
+.bm-call-ring { position: absolute; inset: 0; border-radius: 50%; border: .9vh solid rgba(255,255,255,.55); opacity: 0; }
+.bm-call[data-mode="ringing"] .bm-call-ring, .bm-call[data-mode="calling"] .bm-call-ring {
+  animation: bm-call-ripple 2.4s cubic-bezier(.2,.6,.3,1) infinite; }
+.bm-call-ring:nth-child(2) { animation-delay: .8s !important; }
+.bm-call-ring:nth-child(3) { animation-delay: 1.6s !important; }
+@keyframes bm-call-ripple { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(1.75); opacity: 0; } }
+.bm-call[data-mode="ringing"] .bm-call-avatar-core { animation: bm-call-shake 2.4s ease-in-out infinite; }
+@keyframes bm-call-shake { 0%, 60%, 100% { transform: rotate(0); } 64% { transform: rotate(-7deg); } 68% { transform: rotate(7deg); }
+  72% { transform: rotate(-7deg); } 76% { transform: rotate(7deg); } 80% { transform: rotate(0); } }
+
+.bm-call-info { display: flex; flex-direction: column; align-items: flex-start; gap: 3vh; min-width: 0; }
+.bm-call-sub { font-size: 8vh; font-weight: 600; color: rgba(255,255,255,.75); font-variant-numeric: tabular-nums; }
+.bm-call-sub:empty { display: none; }
+.bm-call-status-dot { width: 4.5vh; height: 4.5vh; border-radius: 50%; background: #9ca3af; flex: none; }
+.bm-call-bar .bm-call-status-dot { width: 3.2vh; height: 3.2vh; }
+.bm-call[data-mode="ringing"] .bm-call-status-dot { background: #4ade80; animation: bm-call-blink 1s ease-in-out infinite; }
+.bm-call[data-mode="calling"] .bm-call-status-dot { background: #60a5fa; animation: bm-call-blink 1s ease-in-out infinite; }
+.bm-call[data-mode="ended"] .bm-call-status-dot { background: #f87171; }
+@keyframes bm-call-blink { 50% { opacity: .25; } }
+.bm-call-title { display: flex; align-items: center; gap: 3.5vh; font-size: 15vh; line-height: 1.02; font-weight: 800;
+  letter-spacing: -.01em; white-space: nowrap; }
+.bm-call-hint { display: inline-flex; align-items: center; gap: 2.4vh; margin-top: 2vh; padding: 2.4vh 4.4vh;
+  border-radius: 999px; background: rgba(255,255,255,.14); border: .4vh solid rgba(255,255,255,.22);
+  font-size: 7.5vh; font-weight: 700; }
+.bm-call-hint:empty { display: none; }
+.bm-call-hint svg { width: 7.5vh; height: 7.5vh; fill: currentColor; flex: none; }
+.bm-call[data-mode="ringing"] .bm-call-hint { background: rgba(74,222,128,.22); border-color: rgba(74,222,128,.6);
+  animation: bm-call-glow 1.6s ease-in-out infinite; }
+@keyframes bm-call-glow { 50% { box-shadow: 0 0 0 1.6vh rgba(74,222,128,.18); } }
+.bm-call-hint q { quotes: "\\201C" "\\201D"; font-weight: 900; }
+
+/* Touch fallback for the voice commands: answer / decline / cancel */
+.bm-call-actions { display: none; gap: 6vh; margin-top: 2vh; }
+.bm-call[data-mode="ringing"] .bm-call-actions, .bm-call[data-mode="calling"] .bm-call-actions { display: flex; }
+.bm-call-btn { width: 17vh; height: 17vh; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  box-shadow: 0 1vh 3vh rgba(0,0,0,.45); -webkit-tap-highlight-color: transparent; }
+.bm-call-btn:active { transform: scale(.94); }
+.bm-call-btn svg { width: 55%; height: 55%; fill: #fff; }
+.bm-call-btn.accept { background: #22c55e; display: none; }
+.bm-call[data-mode="ringing"] .bm-call-btn.accept { display: grid; animation: bm-call-glow-btn 1.2s ease-in-out infinite; }
+@keyframes bm-call-glow-btn { 50% { box-shadow: 0 0 0 2.4vh rgba(34,197,94,.3); } }
+.bm-call-btn.end { background: #e5484d; }
+.bm-call-btn.end svg { transform: rotate(135deg); }
+
+/* ---- in call: remote video fills the screen ---- */
+.bm-call-remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; display: none; }
+.bm-call[data-mode="in_call"] { background: #000; }
+.bm-call[data-mode="in_call"] .bm-call-remote { display: block; }
+.bm-call-bar { position: absolute; left: 3vh; top: 3vh; display: none; align-items: center; gap: 2.4vh;
+  padding: 1.6vh 3.6vh 1.6vh 2.4vh; border-radius: 999px; background: rgba(0,0,0,.55);
+  font-size: 6.5vh; font-weight: 700; }
+.bm-call[data-mode="in_call"] .bm-call-bar { display: flex; }
+.bm-call-bar .bm-call-status-dot { background: #4ade80; }
+.bm-call-timer { font-variant-numeric: tabular-nums; color: rgba(255,255,255,.85); font-weight: 600; }
+.bm-call-hangup { position: absolute; right: 3vh; bottom: 3vh; width: 17vh; height: 17vh; border-radius: 50%; border: 0;
+  display: none; place-items: center; background: #e5484d; box-shadow: 0 1vh 3vh rgba(0,0,0,.45); }
+.bm-call[data-mode="in_call"] .bm-call-hangup { display: grid; }
+.bm-call-hangup svg { width: 55%; height: 55%; fill: #fff; transform: rotate(135deg); }
+`;
+  var ICON_PERSON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.4 0-8 2.3-8 5.2V21h16v-1.8c0-2.9-3.6-5.2-8-5.2Z"/></svg>`;
+  var ICON_MIC = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15Zm6-3.5a1 1 0 1 0-2 0 4 4 0 0 1-8 0 1 1 0 1 0-2 0 6 6 0 0 0 5 5.9V20H8.5a1 1 0 1 0 0 2h7a1 1 0 1 0 0-2H13v-2.6a6 6 0 0 0 5-5.9Z"/></svg>`;
+  var ICON_PHONE = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1L6.6 10.8Z"/></svg>`;
+  function formatDuration(ms) {
+    const s2 = Math.max(0, Math.round(ms / 1e3));
+    const m2 = Math.floor(s2 / 60);
+    return `${m2}:${String(s2 % 60).padStart(2, "0")}`;
+  }
+  var CallView = class {
+    /** onAnswer: pick up (ringing); onEnd: decline or cancel (ringing, calling); onHangup: end a connected call. */
+    constructor({ onHangup, onAnswer, onEnd } = {}) {
+      const style = document.createElement("style");
+      style.textContent = STYLE;
+      document.head.appendChild(style);
+      this.el = document.createElement("div");
+      this.el.className = "bm-call";
+      this.el.dataset.mode = "hidden";
+      this.el.innerHTML = `
+      <video class="bm-call-remote" autoplay playsinline></video>
+      <div class="bm-call-bar"><span class="bm-call-status-dot"></span><span class="bm-call-timer">0:00</span></div>
+      <button type="button" class="bm-call-hangup" aria-label="Hang up">${ICON_PHONE}</button>
+      <div class="bm-call-screen">
+        <div class="bm-call-avatar">
+          <span class="bm-call-ring"></span><span class="bm-call-ring"></span><span class="bm-call-ring"></span>
+          <div class="bm-call-avatar-core">${ICON_PERSON}</div>
+        </div>
+        <div class="bm-call-info">
+          <div class="bm-call-title"><span class="bm-call-status-dot"></span><span class="bm-call-title-text"></span></div>
+          <div class="bm-call-sub"></div>
+          <div class="bm-call-hint"></div>
+          <div class="bm-call-actions">
+            <button type="button" class="bm-call-btn accept" aria-label="Answer">${ICON_PHONE}</button>
+            <button type="button" class="bm-call-btn end" aria-label="End call">${ICON_PHONE}</button>
+          </div>
+        </div>
+      </div>`;
+      document.body.appendChild(this.el);
+      this.remoteVideo = this.el.querySelector(".bm-call-remote");
+      this.el.querySelector(".bm-call-hangup").addEventListener("click", () => onHangup?.());
+      this.el.querySelector(".bm-call-btn.accept").addEventListener("click", () => onAnswer?.());
+      this.el.querySelector(".bm-call-btn.end").addEventListener("click", () => onEnd?.());
+      this._audioCtx = null;
+      this._toneTimer = null;
+      this._hideTimer = null;
+      this._clockTimer = null;
+      this._connectedAt = 0;
+    }
+    get mode() {
+      return this.el.dataset.mode;
+    }
+    // ---- screens ----
+    /** Incoming call; `keyword` is what to say to pick up. */
+    ringing(keyword = "answer") {
+      this._screen("ringing", "Incoming call", "", `${ICON_MIC}<span>Say <q>${keyword}</q> to pick up</span>`);
+    }
+    /** Outgoing call waiting for an answer. */
+    calling(cancelPhrase = "Hey Blimp") {
+      this._screen("calling", "Calling\u2026", "", `${ICON_MIC}<span>Say <q>${cancelPhrase}</q> to cancel</span>`);
+    }
+    inCall() {
+      clearTimeout(this._hideTimer);
+      this.el.dataset.mode = "in_call";
+      this._connectedAt = Date.now();
+      const timer = this.el.querySelector(".bm-call-timer");
+      timer.textContent = "0:00";
+      clearInterval(this._clockTimer);
+      this._clockTimer = setInterval(() => {
+        timer.textContent = formatDuration(Date.now() - this._connectedAt);
+      }, 1e3);
+    }
+    /** End card (reason, plus duration if the call connected), then back to the face. */
+    ended(reason, ms = 3500) {
+      const duration = this._connectedAt ? formatDuration(Date.now() - this._connectedAt) : "";
+      this._stopClock();
+      this._screen("ended", reason, duration, "");
+      this._hideTimer = setTimeout(() => this.hide(), ms);
+    }
+    hide() {
+      clearTimeout(this._hideTimer);
+      this._stopClock();
+      this.stopTone();
+      this.el.dataset.mode = "hidden";
+      this.setRemoteStream(null);
+    }
+    setRemoteStream(stream) {
+      if (this.remoteVideo.srcObject === stream) return;
+      this.remoteVideo.srcObject = stream;
+      if (stream) this.remoteVideo.play().catch(() => {
+      });
+    }
+    _screen(mode, title, sub, hintHtml) {
+      clearTimeout(this._hideTimer);
+      if (mode !== "ended") this._connectedAt = 0;
+      this.el.dataset.mode = mode;
+      this.el.querySelector(".bm-call-title-text").textContent = title;
+      this.el.querySelector(".bm-call-sub").textContent = sub;
+      this.el.querySelector(".bm-call-hint").innerHTML = hintHtml;
+    }
+    _stopClock() {
+      clearInterval(this._clockTimer);
+      this._clockTimer = null;
+    }
+    // ---- tones (generated; no audio assets) ----
+    _ctx() {
+      this._audioCtx ||= new AudioContext();
+      if (this._audioCtx.state === "suspended") this._audioCtx.resume().catch(() => {
+      });
+      return this._audioCtx;
+    }
+    _beep(freqs, seconds, volume) {
+      const c2 = this._ctx();
+      const gain = c2.createGain();
+      gain.gain.value = volume;
+      gain.connect(c2.destination);
+      for (const f2 of freqs) {
+        const osc = c2.createOscillator();
+        osc.frequency.value = f2;
+        osc.connect(gain);
+        osc.start();
+        osc.stop(c2.currentTime + seconds);
+      }
+    }
+    /** "incoming": two short bursts every 3s; "outgoing": ringback, 2s on / 4s off. */
+    startTone(kind) {
+      this.stopTone();
+      const play = kind === "incoming" ? () => {
+        this._beep([480, 620], 0.35, 0.05);
+        setTimeout(() => this._beep([480, 620], 0.35, 0.05), 550);
+      } : () => this._beep([440, 480], 2, 0.05);
+      play();
+      this._toneTimer = setInterval(play, kind === "incoming" ? 3e3 : 6e3);
+    }
+    stopTone() {
+      clearInterval(this._toneTimer);
+      this._toneTimer = null;
+    }
+  };
+
+  // src/videochat/call-config.mjs
+  var STORAGE_KEY = "blimpmate.videochat_v1";
+  function normalizeCallConfig(cfg) {
+    let url2 = typeof cfg?.url === "string" ? cfg.url.trim() : "";
+    if (/^https?:\/\//i.test(url2)) {
+      const u2 = new URL(url2);
+      u2.protocol = u2.protocol === "https:" ? "wss:" : "ws:";
+      if (u2.pathname === "/" || u2.pathname === "") u2.pathname = "/ws";
+      url2 = u2.toString();
+    }
+    const token = typeof cfg?.token === "string" ? cfg.token.trim() : "";
+    return { url: url2, token };
+  }
+  function validateCallConfig(cfg) {
+    const { url: url2 } = normalizeCallConfig(cfg);
+    if (url2 && !/^wss?:\/\/\S+$/i.test(url2)) return "Use wss://host:port/ws (or the https:// page address).";
+    return null;
+  }
+  function loadCallConfig(storage) {
+    const raw = storage?.get?.(STORAGE_KEY);
+    if (raw) {
+      try {
+        const cfg = normalizeCallConfig(typeof raw === "string" ? JSON.parse(raw) : raw);
+        if (!validateCallConfig(cfg)) return cfg;
+      } catch {
+      }
+    }
+    const env = globalThis?.xiaozhiConfig;
+    return normalizeCallConfig({ url: env?.videoChatUrl || "", token: env?.videoChatToken || "" });
+  }
+  function saveCallConfig(storage, cfg) {
+    const normalized = normalizeCallConfig(cfg);
+    storage.set(STORAGE_KEY, JSON.stringify(normalized));
+    return normalized;
+  }
+  function signalingUrl({ url: url2, token }) {
+    const u2 = new URL(url2);
+    u2.searchParams.set("role", "blimp");
+    if (token) u2.searchParams.set("token", token);
+    return u2.toString();
+  }
+
+  // src/videochat/call-controller.mjs
+  var BLIMP_MEDIA = {
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    // The Blimp display and camera are 16:9 landscape
+    video: {
+      facingMode: "user",
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      aspectRatio: { ideal: 16 / 9 },
+      frameRate: { ideal: 24 }
+    }
+  };
+  var END_MESSAGES = {
+    declined: "Call declined",
+    cancelled: "Call cancelled",
+    no_answer: "No answer",
+    hangup: "Call ended",
+    peer_left: "Call ended",
+    connection_lost: "Call dropped"
+  };
+  var CallController = class extends EventTarget {
+    /**
+     * @param {object} deps
+     * @param {object} deps.conversation  xiaozhi Conversation (endSession())
+     * @param {() => object|null} deps.getWakeCoordinator  the agent's wake coordinator (start/stop)
+     * @param {object|null} deps.wakeProvider  wake provider (desktop fallback keyword source)
+     * @param {object|null} deps.nativeWake  Android bridge with startKeywords(set)
+     * @param {(level, message, detail?) => void} [deps.log]
+     */
+    constructor({ conversation, getWakeCoordinator, wakeProvider = null, nativeWake = null, log = () => {
+    } }) {
+      super();
+      this.conversation = conversation;
+      this.getWakeCoordinator = getWakeCoordinator;
+      this.wakeProvider = wakeProvider;
+      this.nativeWake = nativeWake;
+      this.log = log;
+      this.client = null;
+      this.state = "off";
+      this.view = new CallView({
+        onHangup: () => this.end("touch"),
+        onAnswer: () => this.answer("touch"),
+        onEnd: () => this.end("touch")
+      });
+      this._ownsAudio = false;
+      this._stopKeywords = null;
+      this._queue = Promise.resolve();
+    }
+    /** A call is ringing or in progress: the agent must not take the mic. */
+    get busy() {
+      return this.state === "ringing" || this.state === "calling" || this.state === "in_call";
+    }
+    get status() {
+      return {
+        state: this.state,
+        connected: !!this.client?.connected,
+        remote: this.client?.connected ? this.client.presence.remote : "unknown"
+      };
+    }
+    /** Connect to the stream server ({ url, token }); an empty url turns calls off. */
+    configure(cfg) {
+      if (this.client) {
+        this.client.close();
+        this.client = null;
+      }
+      this._setState("off");
+      if (!cfg?.url) return;
+      let url2;
+      try {
+        url2 = signalingUrl(cfg);
+      } catch (err) {
+        this.log("error", "Video call server address is invalid", { error: String(err) });
+        return;
+      }
+      const client = new CallClient({
+        url: url2,
+        getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA)
+      });
+      this.client = client;
+      client.addEventListener("status", (e2) => {
+        if (this.client !== client) return;
+        this.log(
+          e2.detail.connected ? "info" : "warn",
+          e2.detail.connected ? "Video call server connected" : "Video call server disconnected",
+          { reason: e2.detail.reason }
+        );
+        if (e2.detail.connected && this.state === "off") this._setState("idle");
+        if (!e2.detail.connected && !this.busy) this._setState("off");
+        this._emitStatus();
+      });
+      client.addEventListener("presence", () => this._emitStatus());
+      client.addEventListener("call", (e2) => this.client === client && this._onCall(e2.detail));
+      client.addEventListener("remote-stream", (e2) => this.view.setRemoteStream(e2.detail));
+      client.addEventListener("error", (e2) => {
+        if (this.client !== client) return;
+        this.log("warn", `Video call: ${e2.detail.error}`);
+        if (this.state === "calling" && (e2.detail.error === "peer_offline" || e2.detail.error === "busy")) {
+          this._run(() => this._finish(e2.detail.error === "busy" ? "Line busy" : "The remote user is offline"));
+        }
+      });
+      client.connect();
+    }
+    /**
+     * Call the remote user (the agent's call.start tool). Returns at once; the
+     * call starts after `delayMs` so the tool result reaches the server before
+     * the xiaozhi session is closed.
+     */
+    placeCall({ delayMs = 300 } = {}) {
+      const client = this.client;
+      if (!client?.connected) return { ok: false, reason: "not_connected" };
+      if (this.busy) return { ok: false, reason: "busy" };
+      const remote = client.presence.remote;
+      if (remote !== "online") return { ok: false, reason: remote === "in_call" ? "busy" : "offline" };
+      this._setState("calling");
+      setTimeout(() => this._run(async () => {
+        if (this.state !== "calling") return;
+        this.view.calling("Hey Blimp");
+        await this._takeAudio();
+        this.view.startTone("outgoing");
+        if (!client.invite()) return this._finish("Not connected");
+        this._listenFor("wake", () => {
+          this.log("info", "Video call: cancelled by wake word");
+          client.hangup();
+        });
+      }), delayMs);
+      return { ok: true };
+    }
+    hangup() {
+      this.client?.hangup();
+    }
+    /**
+     * End the call the normal way (decline if ringing, else hang up); the server's
+     * idle state then shows the end card. Portal "End call" and the touch buttons.
+     */
+    end(by = "touch") {
+      if (!this.busy) return false;
+      this.log("info", `Video call: ended by ${by}`);
+      if (this.state === "ringing") this.client?.decline();
+      else this.client?.hangup();
+      return true;
+    }
+    /** Decline a ringing call; otherwise no-op. */
+    decline(by = "touch") {
+      if (this.state !== "ringing") return false;
+      return this.end(by);
+    }
+    /**
+     * End any call at once because something else takes the speaker (portal
+     * "play now"). Finishes locally, so the server's later idle state is a no-op.
+     */
+    async endCall() {
+      if (!this.busy) return;
+      this.log("info", "Video call: ended for another task");
+      if (this.state === "ringing") this.client?.decline();
+      else this.client?.hangup();
+      await this._run(() => this.busy && this._finish("Call ended"));
+      this.view.hide();
+    }
+    // ---- call state ----
+    _onCall(call) {
+      if (call.state === "ringing" && call.direction === "incoming") {
+        this._run(() => this._ringing());
+      } else if (call.state === "in_call") {
+        this._run(() => this._inCall());
+      } else if (call.state === "idle" && (this.busy || this._ownsAudio)) {
+        this._run(() => this._finish(END_MESSAGES[call.reason] || "Call ended"));
+      }
+    }
+    async _ringing() {
+      this._setState("ringing");
+      this.log("info", "Video call: incoming");
+      this.view.ringing("answer");
+      await this._takeAudio();
+      if (this.state !== "ringing") return;
+      this.view.startTone("incoming");
+      this._listenFor("answer", () => this.answer("voice"));
+    }
+    /** Pick up a ringing call (spoken "answer", or the portal's fallback button); otherwise no-op. */
+    answer(by = "voice") {
+      if (this.state !== "ringing") return false;
+      this.log("info", `Video call: answered by ${by}`);
+      this._stopListening();
+      this.view.stopTone();
+      this.client?.accept();
+      return true;
+    }
+    async _inCall() {
+      this._stopListening();
+      this.view.stopTone();
+      this._setState("in_call");
+      this.log("info", "Video call: connected");
+      this.view.inCall();
+      this.view.setRemoteStream(this.client?.remoteStream || null);
+    }
+    async _finish(message) {
+      this._stopListening();
+      this.view.stopTone();
+      this.log("info", `Video call: ${message}`);
+      this._setState(this.client?.connected ? "idle" : "off");
+      this.view.setRemoteStream(null);
+      this.view.ended(message);
+      await this._releaseAudio();
+    }
+    // ---- audio ownership ----
+    async _takeAudio() {
+      if (this._ownsAudio) return;
+      this._ownsAudio = true;
+      try {
+        await this.getWakeCoordinator()?.stop();
+      } catch {
+      }
+      try {
+        await this.conversation.endSession();
+      } catch {
+      }
+    }
+    async _releaseAudio() {
+      if (!this._ownsAudio) return;
+      this._ownsAudio = false;
+      try {
+        await this.getWakeCoordinator()?.start();
+      } catch {
+      }
+    }
+    /** Listen for a keyword set ("answer" or "wake") on the wake-word engine. */
+    _listenFor(set, onHit) {
+      this._stopListening();
+      const native = this.nativeWake;
+      let off;
+      if (typeof native?.startKeywords === "function") {
+        off = native.onWake((e2) => {
+          if ((e2?.keywords || "wake") === set) onHit(e2);
+        });
+        native.startKeywords(set);
+        this._stopKeywords = () => {
+          off();
+          native.stop();
+        };
+      } else if (this.wakeProvider) {
+        off = this.wakeProvider.onWake(onHit);
+        this.wakeProvider.start().catch(() => {
+        });
+        this._stopKeywords = () => {
+          off();
+          this.wakeProvider.stop?.().catch?.(() => {
+          });
+        };
+      }
+    }
+    _stopListening() {
+      const stop = this._stopKeywords;
+      this._stopKeywords = null;
+      if (stop) try {
+        stop();
+      } catch {
+      }
+    }
+    // ---- helpers ----
+    _run(fn) {
+      this._queue = this._queue.catch(() => {
+      }).then(fn).catch((err) => {
+        this.log("error", "Video call error", { error: String(err?.message || err) });
+      });
+      return this._queue;
+    }
+    _setState(state) {
+      if (this.state === state) return;
+      this.state = state;
+      this._emitStatus();
+    }
+    _emitStatus() {
+      this.dispatchEvent(new CustomEvent("status", { detail: this.status }));
+    }
+  };
+
+  // src/xiaozhi/mcp/tools/video-call.mjs
+  function registerVideoCallTools(server, callController) {
+    if (!callController) return;
+    server.registerTool({
+      name: "call.start",
+      description: "Start a video call. The device has exactly one contact, the remote user on the call page, so call this for any request to call, video call, ring or phone someone, whatever name the user says. The conversation closes while the call rings; if the result says the call can't be placed, tell the user why.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "The name the user said, if any (only used in your reply)"
+          }
+        }
+      },
+      handler: () => {
+        const result = callController.placeCall();
+        if (result.ok) {
+          return { success: true, message: "Calling the remote user now. The conversation is closing while the call rings." };
+        }
+        const why = {
+          not_connected: "The video call service is not connected.",
+          offline: "The remote user is not online right now.",
+          busy: "The remote user is busy in another call."
+        }[result.reason] || "The call could not be placed.";
+        return {
+          success: false,
+          error: result.reason,
+          message: why,
+          suggested_action: "Do not call the tool again. Tell the user, in one short sentence, that the call can't be made and why.",
+          fallback: "None needed",
+          retry_after: null
+        };
+      }
+    });
+  }
+
+  // src/remote-control/control-channel.mjs
+  var CLOSE_REPLACED = 4002;
+  var CLOSE_BLOCKED = 4003;
+  var PING_MS = 15e3;
+  var PONG_TIMEOUT_MS = 1e4;
+  var RETRY_MS = [1e3, 2e3, 5e3, 1e4, 3e4];
+  var BLOCKED_RETRY_MS = 3e4;
+  function controlUrl(wsUrl) {
+    const url2 = new URL(wsUrl);
+    url2.pathname = "/xiaozhi/control/";
+    return url2.toString();
+  }
+  function getNativeWs2() {
+    return globalThis.nativeWs?.available ? globalThis.nativeWs : null;
+  }
+  var ControlChannel = class extends EventTarget {
+    constructor({ wsUrl, token, identity }) {
+      super();
+      this.url = controlUrl(wsUrl);
+      this.token = token;
+      this.identity = identity;
+      this.connected = false;
+      this.blocked = false;
+      this._native = getNativeWs2();
+      this._sock = null;
+      this._closed = true;
+      this._attempt = 0;
+      this._retryTimer = null;
+      this._pingTimer = null;
+      this._pongTimer = null;
+    }
+    connect() {
+      if (!this._closed) return;
+      this._closed = false;
+      this._open();
+    }
+    close() {
+      this._closed = true;
+      clearTimeout(this._retryTimer);
+      this._teardown();
+    }
+    /** Send a message; false when not connected. */
+    send(msg) {
+      if (!this.connected || !this._sock) return false;
+      this._sock.send(JSON.stringify(msg));
+      return true;
+    }
+    _open() {
+      const headers = {
+        "Protocol-Version": APP_CONFIG.PROTOCOL_VERSION,
+        "Device-Id": this.identity.mac,
+        "Client-Id": this.identity.clientId
+      };
+      if (this.token) headers.Authorization = `Bearer ${this.token}`;
+      const handlers = {
+        open: () => this._onOpen(),
+        text: (text) => this._onText(text),
+        close: (code, reason) => this._onClose(code, reason)
+      };
+      this._sock = this._native ? this._openNative(headers, handlers) : this._openBrowser(headers, handlers);
+    }
+    _openNative(headers, on) {
+      const native = this._native;
+      let id = null;
+      let closed = false;
+      const sock = {
+        send: (text) => id !== null && Promise.resolve(native.sendText(id, text)).catch(() => {
+        }),
+        close: () => {
+          closed = true;
+          if (id !== null) Promise.resolve(native.close(id)).catch(() => {
+          });
+        }
+      };
+      Promise.resolve(native.open(this.url, headers, (ev) => {
+        if (closed || this._sock !== sock) return;
+        if (ev.type === "open") on.open();
+        else if (ev.type === "text") on.text(ev.data);
+        else if (ev.type === "close") on.close(ev.code, ev.reason);
+      })).then((nativeId) => {
+        id = nativeId;
+        if (closed) native.close(nativeId);
+      }).catch(() => this._sock === sock && on.close(1006, "open failed"));
+      return sock;
+    }
+    _openBrowser(headers, on) {
+      const url2 = new URL(this.url);
+      url2.searchParams.set("device-id", headers["Device-Id"]);
+      url2.searchParams.set("client-id", headers["Client-Id"]);
+      if (headers.Authorization) url2.searchParams.set("authorization", headers.Authorization);
+      const ws = new WebSocket(url2);
+      const sock = {
+        send: (text) => ws.readyState === WebSocket.OPEN && ws.send(text),
+        close: () => {
+          try {
+            ws.close();
+          } catch {
+          }
+        }
+      };
+      ws.addEventListener("open", () => this._sock === sock && on.open());
+      ws.addEventListener("message", (e2) => this._sock === sock && typeof e2.data === "string" && on.text(e2.data));
+      ws.addEventListener("close", (e2) => this._sock === sock && on.close(e2.code, e2.reason));
+      return sock;
+    }
+    _onOpen() {
+      this._pingTimer = setInterval(() => this._ping(), PING_MS);
+    }
+    _ping() {
+      if (!this.send({ type: "ping" })) return;
+      clearTimeout(this._pongTimer);
+      this._pongTimer = setTimeout(() => this._onClose(1006, "no pong"), PONG_TIMEOUT_MS);
+    }
+    _onText(text) {
+      let msg;
+      try {
+        msg = JSON.parse(text);
+      } catch {
+        return;
+      }
+      if (msg?.type === "pong") {
+        clearTimeout(this._pongTimer);
+      } else if (msg?.type === "welcome") {
+        this._attempt = 0;
+        this.connected = true;
+        this.blocked = false;
+        this._status("connected");
+      } else if (msg?.type) {
+        this.dispatchEvent(new CustomEvent("command", { detail: msg }));
+      }
+    }
+    _onClose(code, reason) {
+      const wasConnected = this.connected;
+      this._teardown();
+      if (this._closed) return;
+      if (code === CLOSE_REPLACED) {
+        this._closed = true;
+        this._status("replaced", reason);
+        return;
+      }
+      this.blocked = code === CLOSE_BLOCKED;
+      const delay = this.blocked ? BLOCKED_RETRY_MS : RETRY_MS[Math.min(this._attempt++, RETRY_MS.length - 1)];
+      if (this.blocked || wasConnected) this._status(this.blocked ? "blocked" : "disconnected", reason);
+      this._retryTimer = setTimeout(() => !this._closed && this._open(), delay);
+    }
+    _teardown() {
+      clearInterval(this._pingTimer);
+      clearTimeout(this._pongTimer);
+      const sock = this._sock;
+      this._sock = null;
+      this.connected = false;
+      if (sock) sock.close();
+    }
+    _status(state, reason = "") {
+      this.dispatchEvent(new CustomEvent("status", { detail: { state, reason: reason || "" } }));
+    }
+  };
+
+  // src/remote-control/media-playback.mjs
+  var ACTIVATION_WAIT_MS = 3e3;
+  var LIP_SYNC_MS = 40;
+  var LipSync = class {
+    constructor(mouth) {
+      this.mouth = mouth;
+      this.ctx = null;
+      this.source = null;
+      this.timer = null;
+    }
+    start(audio) {
+      this.stop();
+      try {
+        this.ctx ||= new AudioContext();
+        this.ctx.resume().catch(() => {
+        });
+        const source = this.ctx.createMediaElementSource(audio);
+        const analyser = this.ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        analyser.connect(this.ctx.destination);
+        this.source = source;
+        const buf = new Float32Array(analyser.fftSize);
+        this.mouth.begin();
+        this.timer = setInterval(() => {
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (const v2 of buf) sum += v2 * v2;
+          this.mouth.feedRms(Math.sqrt(sum / buf.length));
+        }, LIP_SYNC_MS);
+      } catch {
+      }
+    }
+    stop() {
+      clearInterval(this.timer);
+      this.timer = null;
+      if (!this.source) return;
+      try {
+        this.source.disconnect();
+      } catch {
+      }
+      this.source = null;
+      this.mouth.end();
+    }
+  };
+  var VIDEO_STYLE = `
+.bm-video { position: fixed; inset: 0; z-index: 800; background: #000; display: none; }
+.bm-video.on { display: block; }
+.bm-video video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+`;
+  var VideoScreen = class {
+    constructor() {
+      this.el = null;
+    }
+    createVideo() {
+      if (!this.el) {
+        const style = document.createElement("style");
+        style.textContent = VIDEO_STYLE;
+        document.head.appendChild(style);
+        this.el = document.createElement("div");
+        this.el.className = "bm-video";
+        document.body.appendChild(this.el);
+      }
+      const video = document.createElement("video");
+      video.playsInline = true;
+      video.preload = "auto";
+      this.el.replaceChildren(video);
+      return video;
+    }
+    show() {
+      this.el?.classList.add("on");
+    }
+    hide() {
+      if (!this.el) return;
+      this.el.classList.remove("on");
+      this.el.replaceChildren();
+    }
+  };
+  var MediaPlayback = class extends EventTarget {
+    /**
+     * @param {object} deps
+     * @param {object} deps.conversation  xiaozhi Conversation
+     * @param {() => object|null} deps.getWakeCoordinator
+     * @param {object|null} deps.callController  video calls (busy, endCall())
+     * @param {(level, message, detail?) => void} [deps.log]
+     */
+    constructor({ conversation, getWakeCoordinator, callController = null, log = () => {
+    } }) {
+      super();
+      this.conversation = conversation;
+      this.getWakeCoordinator = getWakeCoordinator;
+      this.callController = callController;
+      this.log = log;
+      this.media = null;
+      this.playback = null;
+      this.loop = false;
+      this.lipSync = new LipSync(conversation.mouth);
+      this.screen = new VideoScreen();
+      this._gen = 0;
+      this._queue = Promise.resolve();
+      this._takingOver = false;
+      this._clickedAt = 0;
+      conversation.addEventListener("wake", () => this.stop("wake word"));
+      conversation.state.addEventListener("device", (e2) => {
+        if (e2.detail?.new !== DeviceState.IDLE && !this._takingOver) this.stop("conversation");
+      });
+      callController?.addEventListener("status", () => {
+        if (callController.busy) this.stop("video call");
+      });
+    }
+    /** A clip is loading, playing or paused. */
+    get active() {
+      return ["loading", "playing", "paused"].includes(this.playback?.status);
+    }
+    /** kind "audio" | "video"; source "cache" (local copy) or "stream". */
+    play({ kind = "audio", id, title, url: url2, source = "stream" }) {
+      const gen = ++this._gen;
+      this._clickedAt = performance.now();
+      this._detach();
+      this._update({ kind, id, title, source, status: "loading", position: 0, duration: 0 });
+      this.log("info", `Play now: ${title}`, { kind, id, source });
+      this._queue = this._queue.catch(() => {
+      }).then(async () => {
+        if (gen !== this._gen) return;
+        this._takingOver = true;
+        try {
+          await this._takeSpeaker();
+        } finally {
+          this._takingOver = false;
+        }
+        if (gen !== this._gen) return;
+        let media;
+        if (kind === "video") {
+          media = this.screen.createVideo();
+        } else {
+          media = new Audio();
+          media.preload = "auto";
+          media.crossOrigin = "anonymous";
+        }
+        this.media = media;
+        media.loop = this.loop;
+        this._attach(media, gen);
+        media.src = url2;
+        if (kind === "audio") this.lipSync.start(media);
+        try {
+          await media.play();
+        } catch (err) {
+          if (gen === this._gen && this.media === media && err?.name !== "AbortError") {
+            this._end("failed", { error: err?.message || String(err) });
+          }
+        }
+      }).catch((err) => {
+        this.log("error", "Play now failed", { error: String(err?.message || err) });
+        if (gen === this._gen) this._end("failed", { error: String(err?.message || err) });
+      });
+      return this._queue;
+    }
+    /** Stop the clip (portal Stop, or something else took the speaker). */
+    stop(reason = "stopped") {
+      if (!this.active) return;
+      this._gen++;
+      this.log("info", `Play now stopped: ${reason}`);
+      this._end("stopped", { reason });
+    }
+    pause() {
+      const media = this.media;
+      if (this.playback?.status !== "playing" || !media) return false;
+      this._update({ ...this.playback, status: "paused", ...this._position(media) });
+      media.pause();
+      this.log("info", `Play now paused: ${this.playback.title}`);
+      return true;
+    }
+    resume() {
+      const media = this.media;
+      if (this.playback?.status !== "paused" || !media) return false;
+      const gen = this._gen;
+      this.log("info", `Play now resumed: ${this.playback.title}`);
+      media.play().catch((err) => {
+        if (gen === this._gen && this.media === media && err?.name !== "AbortError") {
+          this._end("failed", { error: err?.message || String(err) });
+        }
+      });
+      return true;
+    }
+    setLoop(on) {
+      this.loop = !!on;
+      if (this.media) this.media.loop = this.loop;
+      this.log("info", `Loop ${this.loop ? "on" : "off"}`);
+      this._update(this.playback);
+    }
+    _position(media) {
+      return {
+        position: Number.isFinite(media.currentTime) ? media.currentTime : 0,
+        duration: Number.isFinite(media.duration) ? media.duration : 0
+      };
+    }
+    // ---- speaker ownership ----
+    async _takeSpeaker() {
+      if (this.callController?.busy) await this.callController.endCall();
+      const activation = this.getWakeCoordinator()?.activationQueue;
+      if (activation) {
+        await Promise.race([
+          activation.catch(() => {
+          }),
+          new Promise((resolve2) => setTimeout(resolve2, ACTIVATION_WAIT_MS))
+        ]);
+      }
+      const conv = this.conversation;
+      if (conv.protocol?.isOpen?.() || conv._autoSessionActive || conv.state.device !== DeviceState.IDLE) {
+        try {
+          await conv.endSession();
+        } catch {
+        }
+      }
+      for (const media of document.querySelectorAll("audio, video")) {
+        try {
+          media.pause();
+        } catch {
+        }
+      }
+      try {
+        const host = globalThis.hostAudio;
+        if (host?.available && (await host.getState?.())?.status === "playing") await host.stop();
+      } catch {
+      }
+    }
+    // ---- the media element ----
+    _attach(media, gen) {
+      const mine = () => gen === this._gen && this.media === media;
+      const position = () => this._position(media);
+      media.onplaying = () => {
+        if (!mine()) return;
+        if (this.playback.kind === "video") this.screen.show();
+        if (this.playback.status === "loading") {
+          this.log("info", `Playing after ${Math.round(performance.now() - this._clickedAt)} ms`, {
+            kind: this.playback.kind,
+            source: this.playback.source
+          });
+        }
+        this._update({ ...this.playback, status: "playing", ...position() });
+      };
+      media.ondurationchange = () => mine() && this._update({ ...this.playback, ...position() });
+      media.onseeked = media.onwaiting = () => mine() && this.active && this._update({ ...this.playback, ...position() });
+      media.onended = () => mine() && this._end("ended");
+      media.onerror = () => mine() && this._end("failed", { error: media.error?.message || `media error ${media.error?.code || ""}`.trim() });
+      media.onpause = () => mine() && !media.ended && this.playback.status === "playing" && this._end("stopped", { reason: "interrupted" });
+    }
+    _detach() {
+      const media = this.media;
+      this.media = null;
+      if (!media) return;
+      this.lipSync.stop();
+      media.onplaying = media.ondurationchange = media.onseeked = media.onwaiting = null;
+      media.onended = media.onerror = media.onpause = null;
+      try {
+        media.pause();
+      } catch {
+      }
+      media.removeAttribute("src");
+      media.load();
+      if (media instanceof HTMLVideoElement) this.screen.hide();
+    }
+    _end(status, extra = {}) {
+      const media = this.media;
+      const pos = media && Number.isFinite(media.currentTime) ? media.currentTime : this.playback?.position || 0;
+      this._detach();
+      if (this.playback) this._update({ ...this.playback, status, position: pos, ...extra });
+      if (status === "failed") this.log("warn", `Play now failed: ${extra.error || "unknown error"}`);
+    }
+    _update(playback) {
+      this.playback = playback;
+      this.dispatchEvent(new CustomEvent("change", { detail: playback }));
+    }
+  };
+
+  // src/remote-control/video-cache.mjs
+  var DB_NAME = "blimpmate-video-cache";
+  var DB_VERSION = 1;
+  var CHUNK_BYTES = 8 * 1024 * 1024;
+  var RETRY_MS2 = [2e3, 5e3, 15e3, 3e4, 6e4];
+  var PROGRESS_MS = 500;
+  function req(r2) {
+    return new Promise((resolve2, reject) => {
+      r2.onsuccess = () => resolve2(r2.result);
+      r2.onerror = () => reject(r2.error);
+    });
+  }
+  function done(tx) {
+    return new Promise((resolve2, reject) => {
+      tx.oncomplete = () => resolve2();
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+    });
+  }
+  function openDb() {
+    const open = indexedDB.open(DB_NAME, DB_VERSION);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      db.createObjectStore("videos", { keyPath: "id" });
+      db.createObjectStore("chunks");
+    };
+    return req(open);
+  }
+  var HttpError = class extends Error {
+    constructor(status) {
+      super(`HTTP ${status}`);
+      this.status = status;
+    }
+  };
+  var VideoCache = class extends EventTarget {
+    constructor({ log = () => {
+    } } = {}) {
+      super();
+      this.log = log;
+      this.entries = /* @__PURE__ */ new Map();
+      this.urls = /* @__PURE__ */ new Map();
+      this.jobs = /* @__PURE__ */ new Map();
+      this.listed = /* @__PURE__ */ new Map();
+      this._db = null;
+      this._ready = this._load();
+      this._running = false;
+      this._abort = null;
+      this._current = null;
+      this._retryTimer = null;
+      this._lastProgress = 0;
+    }
+    async _load() {
+      try {
+        this._db = await openDb();
+        const tx = this._db.transaction("videos");
+        for (const entry of await req(tx.objectStore("videos").getAll())) {
+          this.entries.set(entry.id, entry);
+          if (entry.complete) await this._makeUrl(entry);
+        }
+        navigator.storage?.persist?.().catch(() => {
+        });
+      } catch (err) {
+        this._db = null;
+        this.log("warn", "Video cache unavailable; videos will stream", { error: String(err?.message || err) });
+      }
+    }
+    /** A local URL for the video, or null when it isn't fully cached. */
+    urlFor(id) {
+      return this.urls.get(id) || null;
+    }
+    /** Per-video cache state for the portal: { id: { state, received, size, error? } }. */
+    status() {
+      const out = {};
+      for (const [id, item] of this.listed) {
+        const entry = this.entries.get(id);
+        const job = this.jobs.get(id);
+        out[id] = {
+          state: this.urls.has(id) ? "cached" : job?.state || "queued",
+          received: entry?.received || 0,
+          size: item.size
+        };
+        if (job?.error) out[id].error = job.error;
+      }
+      return out;
+    }
+    /** Apply the server's video list: [{ id, title, mime, size, url }]. */
+    async sync(videos) {
+      await this._ready;
+      this.listed = new Map(videos.map((v2) => [v2.id, v2]));
+      for (const id of [...this.entries.keys()]) {
+        if (!this.listed.has(id)) await this._remove(id);
+      }
+      for (const id of [...this.jobs.keys()]) {
+        if (!this.listed.has(id)) this.jobs.delete(id);
+      }
+      for (const v2 of videos) {
+        if (!this.urls.has(v2.id) && this.jobs.get(v2.id)?.state !== "downloading") {
+          this.jobs.set(v2.id, { state: "queued", attempt: 0 });
+        }
+      }
+      this._changed();
+      clearTimeout(this._retryTimer);
+      this._run();
+    }
+    // ---- downloads ----
+    async _run() {
+      if (this._running || !this._db) return;
+      this._running = true;
+      try {
+        for (; ; ) {
+          const next = [...this.listed.values()].find((v2) => this.jobs.get(v2.id)?.state === "queued");
+          if (!next) break;
+          await this._download(next);
+        }
+      } finally {
+        this._running = false;
+      }
+      const waiting = [...this.jobs.values()].filter((j2) => j2.state === "failed" && j2.retry);
+      if (waiting.length) {
+        const delay = Math.min(...waiting.map((j2) => RETRY_MS2[Math.min(j2.attempt - 1, RETRY_MS2.length - 1)]));
+        this._retryTimer = setTimeout(() => {
+          for (const j2 of waiting) if (j2.state === "failed") j2.state = "queued";
+          this._run();
+        }, delay);
+      }
+    }
+    async _download(video) {
+      const job = this.jobs.get(video.id);
+      job.state = "downloading";
+      job.error = void 0;
+      this._changed();
+      const abort = new AbortController();
+      this._abort = abort;
+      this._current = video.id;
+      let entry = this.entries.get(video.id);
+      if (!entry || entry.size !== video.size) {
+        if (entry) await this._remove(video.id);
+        entry = { id: video.id, title: video.title, mime: video.mime, size: video.size, received: 0, chunks: 0, complete: false };
+        await this._put(entry);
+      }
+      const started = performance.now();
+      const resumedAt = entry.received;
+      try {
+        const headers = entry.received ? { Range: `bytes=${entry.received}-` } : {};
+        const res = await fetch(video.url, { headers, signal: abort.signal, cache: "no-store" });
+        if (res.status === 200 && entry.received) {
+          await this._remove(video.id, { abort: false });
+          entry = { ...entry, received: 0, chunks: 0 };
+          await this._put(entry);
+        } else if (!res.ok) {
+          throw new HttpError(res.status);
+        }
+        const reader = res.body.getReader();
+        let parts = [];
+        let pending = 0;
+        const flush = async () => {
+          if (!pending) return;
+          if (abort.signal.aborted) throw new DOMException("removed", "AbortError");
+          const blob = new Blob(parts, { type: entry.mime });
+          parts = [];
+          const tx = this._db.transaction(["videos", "chunks"], "readwrite");
+          tx.objectStore("chunks").put(blob, [entry.id, entry.chunks]);
+          entry = { ...entry, chunks: entry.chunks + 1, received: entry.received + pending };
+          tx.objectStore("videos").put(entry);
+          pending = 0;
+          await done(tx);
+          this.entries.set(entry.id, entry);
+        };
+        for (; ; ) {
+          const { done: end, value } = await reader.read();
+          if (end) break;
+          parts.push(value);
+          pending += value.byteLength;
+          if (pending >= CHUNK_BYTES) await flush();
+          this._progress(entry.received + pending);
+        }
+        await flush();
+        if (entry.received !== entry.size) throw new Error(`got ${entry.received} of ${entry.size} bytes`);
+        entry = { ...entry, complete: true };
+        await this._put(entry);
+        await this._makeUrl(entry);
+        this.jobs.delete(video.id);
+        const secs = (performance.now() - started) / 1e3;
+        this.log("info", `Video cached: ${video.title}`, {
+          id: video.id,
+          mb: +(video.size / 1048576).toFixed(1),
+          seconds: +secs.toFixed(1),
+          ...resumedAt ? { resumedFrom: resumedAt } : {}
+        });
+      } catch (err) {
+        if (!this.listed.has(video.id)) return;
+        const expired = err instanceof HttpError && (err.status === 403 || err.status === 404);
+        job.state = "failed";
+        job.attempt++;
+        job.retry = !expired;
+        job.error = expired ? err.status === 404 ? "not on the server" : "link expired" : String(err?.message || err);
+        this.log("warn", `Video download failed: ${video.title}`, { id: video.id, error: job.error });
+      } finally {
+        if (this._abort === abort) this._abort = null;
+        this._current = null;
+        this._changed();
+      }
+    }
+    _progress(received) {
+      const now = performance.now();
+      if (now - this._lastProgress < PROGRESS_MS) return;
+      this._lastProgress = now;
+      const entry = this.entries.get(this._current);
+      if (entry) this.entries.set(entry.id, { ...entry, received });
+      this._changed();
+    }
+    // ---- storage ----
+    async _makeUrl(entry) {
+      const store = this._db.transaction("chunks").objectStore("chunks");
+      const chunks = await Promise.all(
+        Array.from({ length: entry.chunks }, (_, i2) => req(store.get([entry.id, i2])))
+      );
+      if (chunks.some((c2) => !c2)) {
+        await this._remove(entry.id);
+        return;
+      }
+      this.urls.set(entry.id, URL.createObjectURL(new Blob(chunks, { type: entry.mime })));
+    }
+    async _put(entry) {
+      const tx = this._db.transaction("videos", "readwrite");
+      tx.objectStore("videos").put(entry);
+      await done(tx);
+      this.entries.set(entry.id, entry);
+    }
+    async _remove(id, { abort = true } = {}) {
+      if (abort && this._current === id) this._abort?.abort();
+      const url2 = this.urls.get(id);
+      if (url2) URL.revokeObjectURL(url2);
+      this.urls.delete(id);
+      this.entries.delete(id);
+      if (!this._db) return;
+      const tx = this._db.transaction(["videos", "chunks"], "readwrite");
+      tx.objectStore("videos").delete(id);
+      tx.objectStore("chunks").delete(IDBKeyRange.bound([id, 0], [id, Infinity]));
+      await done(tx);
+    }
+    _changed() {
+      this.dispatchEvent(new Event("change"));
+    }
+  };
+
+  // src/remote-control/index.mjs
+  function httpOrigin(wsUrl, httpPort) {
+    const url2 = new URL(wsUrl);
+    url2.protocol = url2.protocol === "wss:" ? "https:" : "http:";
+    if (httpPort) url2.port = String(httpPort);
+    return url2.origin;
+  }
+  function startRemoteControl({ conversation, identity, callController, getWakeCoordinator, log = () => {
+  } }) {
+    const channel = new ControlChannel({ wsUrl: conversation.wsUrl, token: conversation.wsToken, identity });
+    const playback = new MediaPlayback({ conversation, getWakeCoordinator, callController, log });
+    const videos = new VideoCache({ log });
+    const snapshot = () => {
+      const device = conversation.state.device;
+      const inConversation = conversation._autoSessionActive || device !== DeviceState.IDLE;
+      const call = callController?.state || "off";
+      return {
+        type: "state",
+        activity: callController?.busy ? call : playback.active ? "playing" : inConversation ? "conversation" : "idle",
+        conversation: inConversation && device === DeviceState.IDLE ? "connecting" : device,
+        call,
+        wake: !!getWakeCoordinator()?.running,
+        playback: playback.playback,
+        loop: playback.loop,
+        videos: videos.status()
+      };
+    };
+    let pending = false;
+    const report = () => {
+      if (pending) return;
+      pending = true;
+      queueMicrotask(() => {
+        pending = false;
+        channel.send(snapshot());
+      });
+    };
+    channel.addEventListener("status", (e2) => {
+      const { state, reason } = e2.detail;
+      const messages = {
+        connected: ["info", "Server control connected"],
+        disconnected: ["warn", "Server control disconnected; reconnecting"],
+        blocked: ["warn", "Another Blimp is connected to this server; this one is blocked (retrying)"],
+        replaced: ["warn", "This device connected to the server again elsewhere; control here is off"]
+      };
+      const [level, message] = messages[state] || ["info", `Server control: ${state}`];
+      log(level, message, reason ? { reason } : {});
+      if (state === "connected") report();
+    });
+    channel.addEventListener("command", (e2) => {
+      const msg = e2.detail;
+      if (msg.type === "play" && typeof msg.path === "string") {
+        const kind = msg.kind === "video" ? "video" : "audio";
+        const cached = kind === "video" ? videos.urlFor(msg.id) : null;
+        const url2 = cached || new URL(msg.path, httpOrigin(conversation.wsUrl, msg.http_port)).toString();
+        playback.play({ kind, id: msg.id, title: msg.title || (kind === "video" ? "Video" : "Audio"), url: url2, source: cached ? "cache" : "stream" });
+      } else if (msg.type === "settings") {
+        const bargeIn = msg.barge_in === true;
+        if (conversation.bargeIn !== bargeIn) {
+          log("info", `Interrupt ${bargeIn ? "on" : "off"} (from the next time the Blimp listens)`);
+        }
+        conversation.bargeIn = bargeIn;
+      } else if (msg.type === "videos" && Array.isArray(msg.videos)) {
+        const origin = httpOrigin(conversation.wsUrl, msg.http_port);
+        videos.sync(msg.videos.map((v2) => ({ ...v2, url: new URL(v2.path, origin).toString() })));
+      } else if (msg.type === "stop_audio") {
+        playback.stop("stopped from the portal");
+      } else if (msg.type === "pause_media") {
+        if (!playback.pause()) log("info", "Portal pause ignored: nothing is playing");
+      } else if (msg.type === "resume_media") {
+        if (!playback.resume()) log("info", "Portal resume ignored: nothing is paused");
+      } else if (msg.type === "set_loop") {
+        playback.setLoop(msg.loop === true);
+      } else if (msg.type === "answer_call") {
+        if (!callController?.answer("portal")) log("info", "Portal answer ignored: no call is ringing");
+      } else if (msg.type === "decline_call") {
+        if (!callController?.decline("portal")) log("info", "Portal decline ignored: no call is ringing");
+      } else if (msg.type === "end_call") {
+        if (!callController?.end("portal")) log("info", "Portal end call ignored: no call");
+      }
+    });
+    playback.addEventListener("change", report);
+    videos.addEventListener("change", report);
+    conversation.state.addEventListener("device", report);
+    conversation.addEventListener("wake", report);
+    conversation.addEventListener("session-ended", report);
+    callController?.addEventListener("status", report);
+    getWakeCoordinator()?.addEventListener("status", report);
+    channel.connect();
+    return { channel, playback, videos };
+  }
 
   // src/shared-web/renderer.mjs
   window.addEventListener("unhandledrejection", (e2) => {
@@ -36244,10 +38153,28 @@ void main(void)\r
     playbackWorklet: workletUrl("playback-processor.js")
   };
   var activationDialog = createActivationDialog();
+  var backendSetupDialog = createBackendSetupDialog();
   var chatPanel = createChatPanel({
     onConnect: async () => {
-      if (!window.__xz) return;
+      if (!window.__xz?.conversation) return;
       await window.__xz.conversation.connect();
+    },
+    // Backend changes re-run startup (OTA mode may need activation), so save
+    // and reload rather than patching the live conversation.
+    onBackendApply: (cfg) => {
+      saveBackendConfig(window.hostBridge.storage, cfg);
+      location.reload();
+    },
+    onBackendReset: () => {
+      clearBackendConfig(window.hostBridge.storage);
+      location.reload();
+    },
+    onCallApply: (cfg) => {
+      const error = validateCallConfig(cfg);
+      if (error) return error;
+      const saved = saveCallConfig(window.hostBridge.storage, cfg);
+      window.__xz?.callController?.configure(saved);
+      return null;
     },
     onDisconnect: async () => {
       if (!window.__xz) return;
@@ -36485,11 +38412,34 @@ void main(void)\r
           runOnce();
         });
       };
-      const agent = await createXiaozhiAgent({
-        bridge: window.hostBridge,
-        assetUrls,
-        onActivationRequired
-      });
+      const storage = window.hostBridge.storage;
+      let resolved = resolveBackendConfig(storage);
+      if (!resolved) {
+        const cfg = await backendSetupDialog.ask();
+        resolved = { config: saveBackendConfig(storage, cfg), source: "saved" };
+      }
+      chatPanel.setBackend(resolved.config, resolved.source);
+      let agent;
+      try {
+        agent = await createXiaozhiAgent({
+          bridge: window.hostBridge,
+          assetUrls,
+          backend: resolved.config,
+          onActivationRequired
+        });
+      } catch (err) {
+        const msg = err?.message || String(err);
+        chatPanel.setConnected(false, "Backend unavailable");
+        chatPanel.showBackendError(`Could not start: ${msg}`);
+        const cfg = await backendSetupDialog.ask({
+          initial: resolved.config,
+          message: "Could not reach the configured backend. Check the address, or save to retry.",
+          error: msg
+        });
+        saveBackendConfig(storage, cfg);
+        location.reload();
+        return;
+      }
       window.__xz = { conversation: agent.conversation, identity: agent.identity, mode: "manual" };
       chatPanel.setDeviceId(agent.identity.mac);
       try {
@@ -36540,6 +38490,7 @@ void main(void)\r
       conv.addEventListener("session-ended", () => {
         chatPanel.setConversationActive(false);
         chatPanel.setAgentStatus("wake");
+        if (window.__xz.callController?.busy) return;
         window.__xz.wakeClient?.start?.().catch?.(() => {
         });
       });
@@ -36589,6 +38540,36 @@ void main(void)\r
           message: message || `Status: ${phase}`,
           detail: { source: "conversation", phase }
         });
+      });
+      const callController = new CallController({
+        conversation: conv,
+        getWakeCoordinator: () => window.__xz.wakeCoordinator || null,
+        wakeProvider: window.__xz.wakeClient || null,
+        nativeWake: globalThis.nativeWakeWord || null,
+        log: (level, message, detail = {}) => chatPanel.addLog({
+          ts: (/* @__PURE__ */ new Date()).toISOString(),
+          level,
+          message,
+          detail: { source: "video-call", ...detail }
+        })
+      });
+      window.__xz.callController = callController;
+      registerVideoCallTools(conv.mcp, callController);
+      callController.addEventListener("status", (e2) => chatPanel.setCallStatus(e2.detail));
+      const callConfig = loadCallConfig(window.hostBridge.storage);
+      chatPanel.setCallConfig(callConfig);
+      callController.configure(callConfig);
+      window.__xz.remoteControl = startRemoteControl({
+        conversation: conv,
+        identity: agent.identity,
+        callController,
+        getWakeCoordinator: () => window.__xz.wakeCoordinator || null,
+        log: (level, message, detail = {}) => chatPanel.addLog({
+          ts: (/* @__PURE__ */ new Date()).toISOString(),
+          level,
+          message,
+          detail: { source: "remote-control", ...detail }
+        })
       });
       conv.connect().catch((err) => console.error("[xz] ws connect failed:", err));
     } catch (err) {

@@ -1,0 +1,77 @@
+plugins {
+    id "com.android.application"
+}
+
+// BlimpMate Remote: the screen-control agent. A separate app from the Blimp
+// app, so it keeps running (and can bring the Blimp app back) when that one
+// crashes or updates. Signals through the stream server; see README.md.
+android {
+    namespace "com.blimpmate.remote"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.blimpmate.remote"
+        minSdk 26
+        // Written for Android 13 (the Blimp's system). Android 14+ needs a new
+        // capture permission for every session; this agent doesn't handle that.
+        targetSdk 33
+        versionCode 1
+        versionName "0.1.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    signingConfigs {
+        release {
+            def storeFilePath = project.findProperty("BM_RELEASE_STORE_FILE")
+            if (storeFilePath) {
+                storeFile file(storeFilePath)
+                storePassword project.findProperty("BM_RELEASE_STORE_PASSWORD")
+                keyAlias project.findProperty("BM_RELEASE_KEY_ALIAS")
+                keyPassword project.findProperty("BM_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // x86_64 too, for the Android Emulator
+            ndk {
+                abiFilters "x86_64"
+            }
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig project.findProperty("BM_RELEASE_STORE_FILE") != null ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    // The stream server's certificate comes from the Blimp app (one copy to replace)
+    sourceSets {
+        main.res.srcDirs += "${buildDir}/generated/certRes"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
+    // Prebuilt Google WebRTC (org.webrtc): peer connection, encoders, data channel
+    implementation "io.getstream:stream-webrtc-android:1.3.10"
+}
+
+tasks.register("syncCert", Sync) {
+    from("${rootDir}/app/src/main/res/raw") {
+        include "stream_server_cert.pem"
+    }
+    into("${buildDir}/generated/certRes/raw")
+}
+
+preBuild.dependsOn("syncCert")

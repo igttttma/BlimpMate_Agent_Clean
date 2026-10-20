@@ -41,6 +41,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Adds the x86_64 Sherpa libs so debug APKs also run on the
+            // x86_64 Android Emulator; merged with defaultConfig's arm64-v8a.
+            ndk {
+                abiFilters "x86_64"
+            }
+        }
         release {
             // WebView host: app logic is JS in assets, so keep R8 off to avoid
             // stripping the thin Java shell / the JS-bridge reflection surface.

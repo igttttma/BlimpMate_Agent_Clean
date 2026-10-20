@@ -1,18 +1,9 @@
 import { APP_CONFIG, STORAGE_KEYS } from "../config/app-config.mjs";
 import { ensureDeviceIdentity, computeHmacSha256 } from "../config/device-identity.mjs";
+import { BackendMode } from "../config/backend-config.mjs";
 
 const RETRY_INTERVAL_MS = 5000;
 const MAX_RETRY = 60;
-
-// Effective OTA endpoint: env override (BM_XIAOZHI_OTA_URL via preload ->
-// globalThis.xiaozhiConfig.otaUrl) wins over the public tenclass default.
-function resolveOtaUrl() {
-  const override = globalThis?.xiaozhiConfig?.otaUrl;
-  if (typeof override === "string" && override.trim()) {
-    return override.trim();
-  }
-  return APP_CONFIG.OTA_URL;
-}
 
 async function postJson(url, body, headers) {
   const res = await fetch(url, {
@@ -54,30 +45,31 @@ function buildOtaBody(identity) {
   };
 }
 
-export async function requestOta(storage) {
+export async function requestOta(storage, otaUrl) {
+  if (!otaUrl) throw new Error("OTA URL is not configured");
   const identity = await ensureDeviceIdentity(storage);
-  const { status, data } = await postJson(
-    resolveOtaUrl(),
-    buildOtaBody(identity),
-    buildOtaHeaders(identity)
-  );
+  let status, data;
+  try {
+    ({ status, data } = await postJson(otaUrl, buildOtaBody(identity), buildOtaHeaders(identity)));
+  } catch (err) {
+    throw new Error(`Cannot reach OTA endpoint ${otaUrl} (${err?.message || err})`);
+  }
 
   if (status !== 200 || !data) {
-    throw new Error(`OTA HTTP ${status}`);
+    throw new Error(`OTA endpoint ${otaUrl} returned HTTP ${status}`);
   }
 
   if (data.websocket && data.websocket.url) {
     storage.set(STORAGE_KEYS.WS_URL, data.websocket.url);
-    if (data.websocket.token) {
-      storage.set(STORAGE_KEYS.WS_TOKEN, data.websocket.token);
-    }
+    storage.set(STORAGE_KEYS.WS_TOKEN, data.websocket.token || "");
+    storage.set(STORAGE_KEYS.WS_SOURCE_OTA, otaUrl);
     storage.set(STORAGE_KEYS.ACTIVATION_STATUS, "activated");
   }
 
   return { identity, response: data };
 }
 
-export async function performActivation(storage, activation, onProgress) {
+export async function performActivation(storage, otaUrl, activation, onProgress) {
   const identity = await ensureDeviceIdentity(storage);
   const headers = buildOtaHeaders(identity);
   const challenge = activation.challenge;
@@ -93,7 +85,7 @@ export async function performActivation(storage, activation, onProgress) {
     }
   };
 
-  const url = resolveOtaUrl().replace(/\/$/, "") + "/activate";
+  const url = otaUrl.replace(/\/$/, "") + "/activate";
 
   for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
     if (onProgress) onProgress({ attempt, code: activation.code, message: activation.message });
@@ -111,45 +103,45 @@ export async function performActivation(storage, activation, onProgress) {
   throw new Error("Activation timed out");
 }
 
-export async function ensureActivated(storage, onActivationRequired) {
-  // Injected endpoint (env -> preload -> globalThis.xiaozhiConfig) wins: lets
-  // BM_XIAOZHI_WS_URL / BM_XIAOZHI_WS_TOKEN connect to a known xiaozhi endpoint
-  // directly, with no device-binding round-trip.
-  const injectedWs = globalThis?.xiaozhiConfig?.wsUrl;
-  if (typeof injectedWs === "string" && injectedWs.trim()) {
-    const wsUrl = injectedWs.trim();
-    const wsToken = (globalThis?.xiaozhiConfig?.wsToken || storage.get(STORAGE_KEYS.WS_TOKEN) || "");
-    storage.set(STORAGE_KEYS.WS_URL, wsUrl);
-    if (wsToken) storage.set(STORAGE_KEYS.WS_TOKEN, wsToken);
-    storage.set(STORAGE_KEYS.ACTIVATION_STATUS, "activated");
-    return { wsUrl, wsToken, alreadyActivated: true, injected: true };
+
+// Resolve the websocket endpoint for the operator-chosen backend
+// (see config/backend-config.mjs). Direct mode needs no round-trip; OTA mode
+// asks the server every launch and runs device activation when it demands it.
+export async function ensureActivated(storage, backend, onActivationRequired) {
+  if (!backend || !backend.url) throw new Error("No backend configured");
+
+  if (backend.mode === BackendMode.WS) {
+    return { wsUrl: backend.url, wsToken: backend.token || "", alreadyActivated: true };
   }
 
-  const cachedWs = storage.get(STORAGE_KEYS.WS_URL);
-  const cachedToken = storage.get(STORAGE_KEYS.WS_TOKEN);
-  const cachedStatus = storage.get(STORAGE_KEYS.ACTIVATION_STATUS);
-
-  if (cachedWs && cachedToken && cachedStatus === "activated") {
-    return { wsUrl: cachedWs, wsToken: cachedToken, alreadyActivated: true };
+  const otaUrl = backend.url;
+  let response;
+  try {
+    ({ response } = await requestOta(storage, otaUrl));
+  } catch (err) {
+    // OTA unreachable: reuse the endpoint this same OTA URL handed out last time.
+    const cachedWs = storage.get(STORAGE_KEYS.WS_URL);
+    if (cachedWs && storage.get(STORAGE_KEYS.WS_SOURCE_OTA) === otaUrl) {
+      return { wsUrl: cachedWs, wsToken: storage.get(STORAGE_KEYS.WS_TOKEN) || "", alreadyActivated: true, cached: true };
+    }
+    throw err;
   }
-
-  const { response } = await requestOta(storage);
 
   if (response.activation) {
     if (onActivationRequired) {
       await onActivationRequired(response.activation, async (progressCb) => {
-        await performActivation(storage, response.activation, progressCb);
+        await performActivation(storage, otaUrl, response.activation, progressCb);
       });
     } else {
-      await performActivation(storage, response.activation);
+      await performActivation(storage, otaUrl, response.activation);
     }
-    const second = await requestOta(storage);
+    const second = await requestOta(storage, otaUrl);
     if (!second.response.websocket || !second.response.websocket.url) {
       throw new Error("Activation succeeded but no websocket URL");
     }
     return {
       wsUrl: second.response.websocket.url,
-      wsToken: second.response.websocket.token,
+      wsToken: second.response.websocket.token || "",
       alreadyActivated: false
     };
   }
@@ -157,7 +149,7 @@ export async function ensureActivated(storage, onActivationRequired) {
   if (response.websocket && response.websocket.url) {
     return {
       wsUrl: response.websocket.url,
-      wsToken: response.websocket.token,
+      wsToken: response.websocket.token || "",
       alreadyActivated: true
     };
   }

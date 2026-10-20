@@ -721,3 +721,14 @@ pre {
 .xz-dialog-hint { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.6; }
 .xz-dialog-progress { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 .xz-dialog-row { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* === Backend config (first-run dialog + chat panel) === */
+.xz-backend-form { display: flex; flex-direction: column; gap: 8px; }
+.xz-backend-form .xz-input { width: 100%; box-sizing: border-box; flex: none; }
+.xz-backend-form .xz-input[hidden] { display: none; }
+.xz-backend-modes .xz-btn { flex: 1; }
+.xz-backend-hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.xz-backend-error { font-size: 12px; color: #f87171; }
+.xz-backend-error[hidden] { display: none; }
+.xz-backend-dialog .xz-backend-slot { margin-bottom: 14px; }
+.xz-backend-source { font-weight: 400; margin-left: 6px; }

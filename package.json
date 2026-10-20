@@ -9,6 +9,7 @@
     "build:renderer": "esbuild src/shared-web/renderer.mjs --bundle --outfile=src/shared-web/renderer.bundle.js --platform=browser --format=iife",
     "demo": "npm run build:web && electron .",
     "test:wake": "node src/xiaozhi/wake/__tests__/wake-coordinator.test.mjs && node src/xiaozhi/wake/__tests__/session-and-mouth.test.mjs && node src/xiaozhi/audio/__tests__/audio-capture.test.mjs",
+    "test:backend": "node src/xiaozhi/config/__tests__/backend-config.test.mjs",
     "smoke:wake-web": "node scripts/wake-web-audio-smoke.mjs",
     "xiaozhi:activate": "node scripts/xiaozhi-activate.mjs",
     "pack": "npm run build:web && electron-builder --dir",
@@ -68,5 +69,9 @@
     "opus-recorder": "^8.0.5",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^7.4.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.0": true,
+    "electron@42.2.0": true
   }
 }

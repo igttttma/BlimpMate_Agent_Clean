@@ -2,9 +2,19 @@ import { initLive2D } from "./live2d-renderer.mjs";
 import { Live2DControlCore } from "../core/live2d-control-core.mjs";
 import { createLocalHostBridge } from "../bridge/host-bridge.mjs";
 import { createXiaozhiAgent, ListeningMode, DeviceState, AbortReason } from "../xiaozhi/index.mjs";
+import {
+  resolveBackendConfig,
+  saveBackendConfig,
+  clearBackendConfig
+} from "../xiaozhi/config/backend-config.mjs";
+import { createBackendSetupDialog } from "./ui/backend-config-ui.mjs";
 import { createChatPanel } from "./ui/chat-panel.mjs";
 import { createActivationDialog } from "./ui/activation-dialog.mjs";
 import { createWakeProvider, WakeCoordinator } from "../xiaozhi/wake/wake-coordinator.mjs";
+import { CallController } from "../videochat/call-controller.mjs";
+import { loadCallConfig, saveCallConfig, validateCallConfig } from "../videochat/call-config.mjs";
+import { registerVideoCallTools } from "../xiaozhi/mcp/tools/video-call.mjs";
+import { startRemoteControl } from "../remote-control/index.mjs";
 
 window.addEventListener("unhandledrejection", (e) => {
   console.error("[xz] unhandled rejection:", e.reason);
@@ -605,10 +615,28 @@ const assetUrls = {
 };
 
 const activationDialog = createActivationDialog();
+const backendSetupDialog = createBackendSetupDialog();
 const chatPanel = createChatPanel({
   onConnect: async () => {
-    if (!window.__xz) return;
+    if (!window.__xz?.conversation) return;
     await window.__xz.conversation.connect();
+  },
+  // Backend changes re-run startup (OTA mode may need activation), so save
+  // and reload rather than patching the live conversation.
+  onBackendApply: (cfg) => {
+    saveBackendConfig(window.hostBridge.storage, cfg);
+    location.reload();
+  },
+  onBackendReset: () => {
+    clearBackendConfig(window.hostBridge.storage);
+    location.reload();
+  },
+  onCallApply: (cfg) => {
+    const error = validateCallConfig(cfg);
+    if (error) return error;
+    const saved = saveCallConfig(window.hostBridge.storage, cfg);
+    window.__xz?.callController?.configure(saved);
+    return null;
   },
   onDisconnect: async () => {
     if (!window.__xz) return;
@@ -869,11 +897,37 @@ if (window.hostBridge && window.hostBridge.storage) {
       });
     };
 
-    const agent = await createXiaozhiAgent({
-      bridge: window.hostBridge,
-      assetUrls,
-      onActivationRequired
-    });
+    // Saved config > host env (.env) > ask. If the chosen backend fails to
+    // start (e.g. OTA unreachable), ask again with the error shown.
+    const storage = window.hostBridge.storage;
+    let resolved = resolveBackendConfig(storage);
+    if (!resolved) {
+      const cfg = await backendSetupDialog.ask();
+      resolved = { config: saveBackendConfig(storage, cfg), source: "saved" };
+    }
+    chatPanel.setBackend(resolved.config, resolved.source);
+
+    let agent;
+    try {
+      agent = await createXiaozhiAgent({
+        bridge: window.hostBridge,
+        assetUrls,
+        backend: resolved.config,
+        onActivationRequired
+      });
+    } catch (err) {
+      const msg = err?.message || String(err);
+      chatPanel.setConnected(false, "Backend unavailable");
+      chatPanel.showBackendError(`Could not start: ${msg}`);
+      const cfg = await backendSetupDialog.ask({
+        initial: resolved.config,
+        message: "Could not reach the configured backend. Check the address, or save to retry.",
+        error: msg
+      });
+      saveBackendConfig(storage, cfg);
+      location.reload();
+      return;
+    }
 
     window.__xz = { conversation: agent.conversation, identity: agent.identity, mode: "manual" };
     chatPanel.setDeviceId(agent.identity.mac);
@@ -933,6 +987,8 @@ if (window.hostBridge && window.hostBridge.storage) {
     conv.addEventListener("session-ended", () => {
       chatPanel.setConversationActive(false);
       chatPanel.setAgentStatus("wake");
+      // A ringing or active video call owns the microphone; it re-arms the wake word itself
+      if (window.__xz.callController?.busy) return;
       window.__xz.wakeClient?.start?.().catch?.(() => {});
     });
     conv.state.addEventListener("mode", (e) => {
@@ -981,6 +1037,34 @@ if (window.hostBridge && window.hostBridge.storage) {
         message: message || `Status: ${phase}`,
         detail: { source: "conversation", phase }
       });
+    });
+
+    // --- Video calls (separate server; see src/videochat) -----------------
+    const callController = new CallController({
+      conversation: conv,
+      getWakeCoordinator: () => window.__xz.wakeCoordinator || null,
+      wakeProvider: window.__xz.wakeClient || null,
+      nativeWake: globalThis.nativeWakeWord || null,
+      log: (level, message, detail = {}) => chatPanel.addLog({
+        ts: new Date().toISOString(), level, message, detail: { source: "video-call", ...detail }
+      })
+    });
+    window.__xz.callController = callController;
+    registerVideoCallTools(conv.mcp, callController);
+    callController.addEventListener("status", (e) => chatPanel.setCallStatus(e.detail));
+    const callConfig = loadCallConfig(window.hostBridge.storage);
+    chatPanel.setCallConfig(callConfig);
+    callController.configure(callConfig);
+
+    // --- Server portal control (online status, "play now") ---------------
+    window.__xz.remoteControl = startRemoteControl({
+      conversation: conv,
+      identity: agent.identity,
+      callController,
+      getWakeCoordinator: () => window.__xz.wakeCoordinator || null,
+      log: (level, message, detail = {}) => chatPanel.addLog({
+        ts: new Date().toISOString(), level, message, detail: { source: "remote-control", ...detail }
+      })
     });
 
     conv.connect().catch((err) => console.error("[xz] ws connect failed:", err));

@@ -1,6 +1,8 @@
-// Chat panel UI: toggle button + collapsible panel with connect, mode,
-// big PTT button, abort, subtitle area, settings.
-export function createChatPanel({ onConnect, onDisconnect, onPress, onRelease, onAutoToggle, onAbort, onEndSession, onSendText, onModeChange }) {
+import { createBackendForm } from "./backend-config-ui.mjs";
+
+// Chat panel UI: toggle button + collapsible panel with connect, backend,
+// mode, big PTT button, abort, subtitle area, settings.
+export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onEndSession, onSendText, onModeChange }) {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "xz-panel-toggle";
@@ -31,6 +33,27 @@ export function createChatPanel({ onConnect, onDisconnect, onPress, onRelease, o
       <div class="xz-row">
         <button type="button" class="xz-btn" id="xzConnect">Connect</button>
         <button type="button" class="xz-btn" id="xzDisconnect">Disconnect</button>
+      </div>
+
+      <div class="xz-section">
+        <div class="xz-section-label">Backend<span class="xz-backend-source" id="xzBackendSource"></span></div>
+        <div id="xzBackendSlot"></div>
+        <div class="xz-row" style="margin-top: 8px;">
+          <button type="button" class="xz-btn" id="xzBackendApply">Apply</button>
+          <button type="button" class="xz-btn" id="xzBackendReset" title="Forget the saved backend">Reset</button>
+        </div>
+      </div>
+
+      <div class="xz-section">
+        <div class="xz-section-label">Video calls<span class="xz-backend-source" id="xzCallStatus"></span></div>
+        <input type="text" class="xz-input" id="xzCallUrl" spellcheck="false" autocomplete="off"
+               placeholder="wss://203.0.113.7:8443/ws (empty = off)" />
+        <input type="text" class="xz-input" id="xzCallToken" spellcheck="false" autocomplete="off"
+               placeholder="Blimp token" />
+        <div class="xz-backend-error" id="xzCallError" role="alert" hidden></div>
+        <div class="xz-row" style="margin-top: 8px;">
+          <button type="button" class="xz-btn" id="xzCallApply">Apply</button>
+        </div>
       </div>
 
       <div class="xz-section">
@@ -112,6 +135,10 @@ export function createChatPanel({ onConnect, onDisconnect, onPress, onRelease, o
   const modeManual = $("xzModeManual");
   const modeAuto = $("xzModeAuto");
   const textInput = $("xzTextInput");
+  const backendForm = createBackendForm();
+  $("xzBackendSlot").appendChild(backendForm.el);
+  const backendSourceEl = $("xzBackendSource");
+  const backendResetBtn = $("xzBackendReset");
   const displayPageEl = $("xzDisplayPage");
   const displaySubtitleEl = $("xzDisplaySubtitle");
   const displayCardEl = $("xzDisplayCard");
@@ -154,6 +181,19 @@ export function createChatPanel({ onConnect, onDisconnect, onPress, onRelease, o
   document.addEventListener("click", () => { panel.hidden = true; });
 
   $("xzConnect").addEventListener("click", () => onConnect && onConnect());
+  const applyBackend = () => {
+    const cfg = backendForm.validate();
+    if (cfg && onBackendApply) onBackendApply(cfg);
+  };
+  backendForm.onSubmit(applyBackend);
+  $("xzBackendApply").addEventListener("click", applyBackend);
+  backendResetBtn.addEventListener("click", () => onBackendReset && onBackendReset());
+  const callErrorEl = $("xzCallError");
+  $("xzCallApply").addEventListener("click", () => {
+    const error = onCallApply ? onCallApply({ url: $("xzCallUrl").value, token: $("xzCallToken").value }) : null;
+    callErrorEl.textContent = error || "";
+    callErrorEl.hidden = !error;
+  });
   $("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
   $("xzAbort").addEventListener("click", () => onAbort && onAbort());
   const endSessionBtn = document.createElement("button");
@@ -252,6 +292,22 @@ export function createChatPanel({ onConnect, onDisconnect, onPress, onRelease, o
     setTts(text) { ttsEl.textContent = text; },
     setEmotion(e) { emoEl.textContent = e || "-"; },
     setDeviceId(id) { deviceIdEl.textContent = id || ""; },
+    // source: "saved" (chosen in the UI), "env" (Electron .env) or null.
+    setBackend(config, source = null) {
+      backendForm.setValue(config);
+      backendSourceEl.textContent = source === "saved" ? "(saved)" : source === "env" ? "(from .env)" : "";
+      backendResetBtn.disabled = source !== "saved";
+    },
+    showBackendError(msg) { backendForm.showError(msg); },
+    setCallConfig(cfg) {
+      $("xzCallUrl").value = cfg?.url || "";
+      $("xzCallToken").value = cfg?.token || "";
+    },
+    setCallStatus(s) {
+      const text = !s || s.state === "off" ? (s?.connected === false ? "(not connected)" : "(off)")
+        : s.state === "idle" ? `(remote ${s.remote})` : `(${s.state.replace("_", " ")})`;
+      $("xzCallStatus").textContent = text;
+    },
     setDisplayState(state = {}) {
       const page = typeof state.page === "string" ? state.page : "avatar";
       const subtitle = typeof state.subtitle === "string" ? state.subtitle : "";

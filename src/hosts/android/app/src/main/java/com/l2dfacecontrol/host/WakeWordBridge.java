@@ -2,6 +2,7 @@ package com.l2dfacecontrol.host;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
@@ -22,6 +23,10 @@ import com.k2fsa.sherpa.onnx.OnlineStream;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,6 +37,11 @@ public final class WakeWordBridge {
     private static final String TAG = "BlimpMateWake";
     private static final int SAMPLE_RATE = 16000;
     private static final String WAKE_PHRASE = "Hey Blimp";
+    // Keyword sets the detector can listen for. "wake" uses the model's
+    // keywords.txt; others are given to the stream directly (BPE tokens from
+    // the model's bpe.model, "@label" names the result).
+    private static final String KEYWORDS_ANSWER = "\u2581AN S W ER @answer";
+    private volatile String keywordSet = "wake";
 
     private final Activity activity;
     private final WebView webView;
@@ -43,6 +53,15 @@ public final class WakeWordBridge {
     private volatile boolean released;
     private volatile String lastError = "";
     private volatile AudioRecord audioRecord;
+    // Mic diagnostics, mirroring the desktop service's /wake_word/status fields.
+    private volatile long audioSamples;
+    private volatile float lastAudioRms;
+    private volatile float peakAudioRms;
+    // Debug builds only: the last DEBUG_SECONDS of mic audio, for dumpDebugAudio().
+    private static final int DEBUG_SECONDS = 10;
+    private short[] debugRing;
+    private int debugPos;
+    private boolean debugWrapped;
     private KeywordSpotter spotter;
 
     public WakeWordBridge(Activity activity, WebView webView) {
@@ -52,6 +71,13 @@ public final class WakeWordBridge {
 
     @JavascriptInterface
     public String start() {
+        return startKeywords("wake");
+    }
+
+    /** Listen for a keyword set: "wake" (Hey Blimp) or "answer" (incoming calls). */
+    @JavascriptInterface
+    public String startKeywords(String set) {
+        keywordSet = "answer".equals(set) ? "answer" : "wake";
         if (released) return status(false, "released");
         requested = true;
         if (!hasAudioPermission()) {
@@ -66,6 +92,46 @@ public final class WakeWordBridge {
         requested = false;
         stopRecorder();
         return status(false, "stopping");
+    }
+
+    /**
+     * Debug builds only: writes the last few seconds the detector heard to
+     * files/wake_debug.wav. Pull it with
+     * `adb exec-out run-as com.l2dfacecontrol.host cat files/wake_debug.wav > wake.wav`.
+     */
+    @JavascriptInterface
+    public synchronized String dumpDebugAudio() {
+        if (!isDebuggable() || debugRing == null) return "{\"ok\":false}";
+        int count = debugWrapped ? debugRing.length : debugPos;
+        File out = new File(activity.getFilesDir(), "wake_debug.wav");
+        try (FileOutputStream fos = new FileOutputStream(out)) {
+            ByteBuffer header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+            header.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + count * 2)
+                    .put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16)
+                    .putShort((short) 1).putShort((short) 1).putInt(SAMPLE_RATE).putInt(SAMPLE_RATE * 2)
+                    .putShort((short) 2).putShort((short) 16)
+                    .put("data".getBytes(StandardCharsets.US_ASCII)).putInt(count * 2);
+            fos.write(header.array());
+            ByteBuffer body = ByteBuffer.allocate(count * 2).order(ByteOrder.LITTLE_ENDIAN);
+            int start = debugWrapped ? debugPos : 0;
+            for (int i = 0; i < count; i++) body.putShort(debugRing[(start + i) % debugRing.length]);
+            fos.write(body.array());
+            return "{\"ok\":true,\"path\":\"" + out.getAbsolutePath() + "\",\"samples\":" + count + "}";
+        } catch (Exception e) {
+            return "{\"ok\":false,\"error\":\"" + e.getClass().getSimpleName() + "\"}";
+        }
+    }
+
+    private boolean isDebuggable() {
+        return (activity.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    private synchronized void recordDebugAudio(short[] pcm, int count) {
+        if (debugRing == null) debugRing = new short[SAMPLE_RATE * DEBUG_SECONDS];
+        for (int i = 0; i < count; i++) {
+            debugRing[debugPos++] = pcm[i];
+            if (debugPos == debugRing.length) { debugPos = 0; debugWrapped = true; }
+        }
     }
 
     @JavascriptInterface
@@ -109,6 +175,8 @@ public final class WakeWordBridge {
                 running = false;
                 workerActive.set(false);
                 postStatus(false, lastError.isEmpty() ? "stopped" : lastError);
+                // A start() that arrived while this worker was winding down
+                if (requested && !released && lastError.isEmpty()) scheduleWorker();
             }
         });
     }
@@ -136,7 +204,8 @@ public final class WakeWordBridge {
         try {
             lastError = "";
             KeywordSpotter kws = getSpotter();
-            stream = kws.createStream("");
+            String streamSet = keywordSet;
+            stream = kws.createStream(keywordsFor(streamSet));
             if (stream.getPtr() == 0L) throw new IllegalStateException("failed to create KWS stream");
 
             int minBytes = AudioRecord.getMinBufferSize(
@@ -156,16 +225,34 @@ public final class WakeWordBridge {
                 throw new IllegalStateException("AudioRecord initialization failed");
             }
             audioRecord = recorder;
+            audioSamples = 0;
+            lastAudioRms = 0f;
+            peakAudioRms = 0f;
             recorder.startRecording();
             running = true;
             postStatus(true, "listening");
 
             short[] pcm = new short[SAMPLE_RATE / 10];
+            final boolean debuggable = isDebuggable();
             while (requested && !released) {
                 int count = recorder.read(pcm, 0, pcm.length);
                 if (count <= 0) continue;
+                if (debuggable) recordDebugAudio(pcm, count);
                 float[] samples = new float[count];
-                for (int i = 0; i < count; i++) samples[i] = pcm[i] / 32768.0f;
+                double sumSquares = 0;
+                for (int i = 0; i < count; i++) {
+                    samples[i] = pcm[i] / 32768.0f;
+                    sumSquares += samples[i] * samples[i];
+                }
+                lastAudioRms = (float) Math.sqrt(sumSquares / count);
+                peakAudioRms = Math.max(peakAudioRms, lastAudioRms);
+                audioSamples += count;
+                if (!streamSet.equals(keywordSet)) {
+                    // Switched keyword sets while running: start a fresh stream
+                    stream.release();
+                    streamSet = keywordSet;
+                    stream = kws.createStream(keywordsFor(streamSet));
+                }
                 stream.acceptWaveform(samples, SAMPLE_RATE);
                 while (kws.isReady(stream)) {
                     kws.decode(stream);
@@ -173,7 +260,7 @@ public final class WakeWordBridge {
                     if (keyword != null && !keyword.trim().isEmpty()) {
                         kws.reset(stream);
                         requested = false;
-                        postWake(WAKE_PHRASE);
+                        postWake("answer".equals(streamSet) ? "answer" : WAKE_PHRASE, streamSet);
                         break;
                     }
                 }
@@ -207,6 +294,9 @@ public final class WakeWordBridge {
             json.put("mode", "sherpa-native");
             json.put("audio_backend", "android-audiorecord");
             json.put("message", message == null ? "" : message);
+            json.put("audio_samples", audioSamples);
+            json.put("last_audio_rms", lastAudioRms);
+            json.put("peak_audio_rms", peakAudioRms);
         } catch (Exception ignored) {}
         return json.toString();
     }
@@ -215,11 +305,16 @@ public final class WakeWordBridge {
         postEvent("status", status(isRunning, message));
     }
 
-    private void postWake(String word) {
+    private static String keywordsFor(String set) {
+        return "answer".equals(set) ? KEYWORDS_ANSWER : "";
+    }
+
+    private void postWake(String word, String set) {
         JSONObject json = new JSONObject();
         try {
             json.put("type", "wake");
             json.put("word", word);
+            json.put("keywords", set);
             json.put("source", "sherpa-native");
             json.put("timestamp", System.currentTimeMillis() / 1000.0);
         } catch (Exception ignored) {}

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">BlimpMate Remote</string>
+    <string name="input_service_label">BlimpMate Remote control</string>
+    <string name="input_service_description">Lets a signed-in viewer on the BlimpMate stream server tap, swipe and type on this device.</string>
+</resources>

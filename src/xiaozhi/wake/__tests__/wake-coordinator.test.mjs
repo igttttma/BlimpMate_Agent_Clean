@@ -54,7 +54,7 @@ async function testConversationWakeInterruptOrder() {
     async abort(reason) { calls.push(`abort:${reason}`); },
     async stopListening() { calls.push("stop-listening"); this._sendingFrames = false; },
     async connect() { calls.push("connect"); return true; },
-    async sendText(text) { calls.push(`detect:${text}`); return true; },
+    async sendText(text, opts) { calls.push(`detect:${text}${opts?.wake ? ":wake" : ""}`); return true; },
     async startListening(mode) { calls.push(`listen:${mode}`); return true; }
   };
   const result = await Conversation.prototype.activateFromWake.call(
@@ -67,7 +67,7 @@ async function testConversationWakeInterruptOrder() {
     "pause-media",
     `abort:${AbortReason.WAKE_WORD_DETECTED}`,
     "stop-listening",
-    "detect:Hey Blimp",
+    "detect:Hey Blimp:wake",
     `listen:${ListeningMode.AUTO_STOP}`
   ]);
 }
@@ -98,6 +98,7 @@ async function testEndSessionLifecycle() {
     mouth: { end: () => calls.push("mouth-end") },
     state: { setDevice: (state) => calls.push(`device:${state}`) },
     _emitLog() {},
+    _endTtsMouth() { Conversation.prototype._endTtsMouth.call(this); },
     dispatchEvent(event) { calls.push(`event:${event.type}`); },
     async abort(reason) { calls.push(`abort:${reason}`); },
     async stopListening() { calls.push("stop-listening"); },
@@ -130,6 +131,7 @@ async function testRemoteDisconnectReturnsToWakeMode() {
     state: { setDevice: (state) => calls.push(`device:${state}`) },
     async stopListening() { calls.push("stop-listening"); },
     _emitLog(level, message) { calls.push(`log:${level}:${message}`); },
+    _endTtsMouth() { Conversation.prototype._endTtsMouth.call(this); },
     dispatchEvent(event) { calls.push(`event:${event.type}`); }
   };
 

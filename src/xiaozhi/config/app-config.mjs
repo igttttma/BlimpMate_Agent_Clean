@@ -2,7 +2,6 @@ export const APP_CONFIG = Object.freeze({
   APP_NAME: "l2d-face-control",
   APP_VERSION: "0.1.0",
   BOARD_TYPE: "web",
-  OTA_URL: "https://api.tenclass.net/xiaozhi/ota/",
   PROTOCOL_VERSION: "1",
   AUDIO: Object.freeze({
     INPUT_SAMPLE_RATE: 16000,
@@ -30,5 +29,9 @@ export const STORAGE_KEYS = Object.freeze({
   CLIENT_ID: "xiaozhi.client_id",
   ACTIVATION_STATUS: "xiaozhi.activation_status",
   WS_URL: "xiaozhi.ws_url",
-  WS_TOKEN: "xiaozhi.ws_token"
+  WS_TOKEN: "xiaozhi.ws_token",
+  // OTA URL that produced the cached WS_URL/WS_TOKEN (offline fallback).
+  WS_SOURCE_OTA: "xiaozhi.ws_source_ota",
+  // Operator-chosen backend ({ mode, url, token }); see backend-config.mjs.
+  BACKEND: "blimpmate.backend_v1"
 });

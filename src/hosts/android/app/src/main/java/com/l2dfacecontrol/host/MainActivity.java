@@ -3,6 +3,7 @@ package com.l2dfacecontrol.host;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -24,12 +25,17 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class MainActivity extends Activity {
     private static final int REQ_RECORD_AUDIO = 1001;
+    // WebView getUserMedia requests (mic and/or camera) waiting for a runtime permission
+    private static final int REQ_WEB_MEDIA = 1002;
     private static final long RELOAD_DELAY_MS = 5000;
     private WebView webView;
     private WakeWordBridge wakeWordBridge;
+    private WsBridge wsBridge;
     private PermissionRequest pendingPermissionRequest;
     private String remoteDisplayUrl;
     private boolean isKioskMode;
@@ -54,6 +60,11 @@ public final class MainActivity extends Activity {
         remoteDisplayUrl = readRemoteDisplayUrl();
         isKioskMode = remoteDisplayUrl != null && !remoteDisplayUrl.isEmpty();
 
+        // Debug builds only: lets chrome://inspect / CDP attach to the WebView.
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
+
         webView = new WebView(this);
         setContentView(webView);
 
@@ -66,7 +77,7 @@ public final class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
 
         if (!isKioskMode) {
-            WsBridge wsBridge = new WsBridge(webView);
+            wsBridge = new WsBridge(webView);
             webView.addJavascriptInterface(wsBridge, "__nativeWsRaw");
             wakeWordBridge = new WakeWordBridge(this, webView);
             webView.addJavascriptInterface(wakeWordBridge, "__nativeWakeWordRaw");
@@ -97,6 +108,9 @@ public final class MainActivity extends Activity {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 if (!isKioskMode) {
+                    // A reload (e.g. after changing the backend) leaves the old
+                    // page's sockets open; the new page can't reach them.
+                    if (wsBridge != null) wsBridge.closeAll();
                     view.evaluateJavascript(NATIVE_WS_GLUE + NATIVE_WAKE_WORD_GLUE, null);
                 }
             }
@@ -124,28 +138,29 @@ public final class MainActivity extends Activity {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 runOnUiThread(() -> {
-                    String[] resources = request.getResources();
-                    boolean wantsAudio = false;
-                    for (String r : resources) {
-                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) {
-                            wantsAudio = true;
-                            break;
+                    // Microphone (conversation) and camera (camera.take_photo tool) only
+                    List<String> missing = new ArrayList<>();
+                    boolean wantsMedia = false;
+                    for (String r : request.getResources()) {
+                        String permission = androidPermissionFor(r);
+                        if (permission == null) continue;
+                        wantsMedia = true;
+                        if (ContextCompat.checkSelfPermission(MainActivity.this, permission)
+                                != PackageManager.PERMISSION_GRANTED) {
+                            missing.add(permission);
                         }
                     }
-                    if (!wantsAudio) {
+                    if (!wantsMedia) {
                         request.deny();
-                        return;
-                    }
-                    if (ContextCompat.checkSelfPermission(
-                            MainActivity.this, Manifest.permission.RECORD_AUDIO)
-                            == PackageManager.PERMISSION_GRANTED) {
-                        request.grant(new String[] { PermissionRequest.RESOURCE_AUDIO_CAPTURE });
+                    } else if (missing.isEmpty()) {
+                        grantPermitted(request);
                     } else {
+                        if (pendingPermissionRequest != null) pendingPermissionRequest.deny();
                         pendingPermissionRequest = request;
                         ActivityCompat.requestPermissions(
                             MainActivity.this,
-                            new String[] { Manifest.permission.RECORD_AUDIO },
-                            REQ_RECORD_AUDIO
+                            missing.toArray(new String[0]),
+                            REQ_WEB_MEDIA
                         );
                     }
                 });
@@ -188,21 +203,42 @@ public final class MainActivity extends Activity {
         }, RELOAD_DELAY_MS);
     }
 
+    private static String androidPermissionFor(String webResource) {
+        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(webResource)) return Manifest.permission.RECORD_AUDIO;
+        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(webResource)) return Manifest.permission.CAMERA;
+        return null;
+    }
+
+    /** Grants the media resources whose Android permission is held; denies if none. */
+    private void grantPermitted(PermissionRequest request) {
+        List<String> granted = new ArrayList<>();
+        for (String r : request.getResources()) {
+            String permission = androidPermissionFor(r);
+            if (permission != null && ContextCompat.checkSelfPermission(this, permission)
+                    == PackageManager.PERMISSION_GRANTED) {
+                granted.add(r);
+            }
+        }
+        if (granted.isEmpty()) {
+            request.deny();
+        } else {
+            request.grant(granted.toArray(new String[0]));
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_RECORD_AUDIO && pendingPermissionRequest != null) {
-            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-            if (granted) {
-                pendingPermissionRequest.grant(new String[] { PermissionRequest.RESOURCE_AUDIO_CAPTURE });
-            } else {
-                pendingPermissionRequest.deny();
-            }
+        if (requestCode == REQ_WEB_MEDIA && pendingPermissionRequest != null) {
+            grantPermitted(pendingPermissionRequest);
             pendingPermissionRequest = null;
         }
-        if (requestCode == REQ_RECORD_AUDIO && wakeWordBridge != null) {
-            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-            wakeWordBridge.onAudioPermissionResult(granted);
+        if ((requestCode == REQ_RECORD_AUDIO || requestCode == REQ_WEB_MEDIA) && wakeWordBridge != null) {
+            for (int i = 0; i < permissions.length && i < grantResults.length; i++) {
+                if (Manifest.permission.RECORD_AUDIO.equals(permissions[i])) {
+                    wakeWordBridge.onAudioPermissionResult(grantResults[i] == PackageManager.PERMISSION_GRANTED);
+                }
+            }
         }
     }
 
@@ -212,6 +248,10 @@ public final class MainActivity extends Activity {
         if (wakeWordBridge != null) {
             wakeWordBridge.release();
             wakeWordBridge = null;
+        }
+        if (wsBridge != null) {
+            wsBridge.closeAll();
+            wsBridge = null;
         }
         if (webView != null) {
             webView.destroy();
@@ -281,6 +321,7 @@ public final class MainActivity extends Activity {
         "    available: true,\n" +
         "    onWake: function(cb){ handlers.add(cb); return function(){ handlers.delete(cb); }; },\n" +
         "    start: function(){ lastStatus = parse(window.__nativeWakeWordRaw.start()); return Promise.resolve(lastStatus); },\n" +
+        "    startKeywords: function(set){ lastStatus = parse(window.__nativeWakeWordRaw.startKeywords(String(set))); return Promise.resolve(lastStatus); },\n" +
         "    stop: function(){ lastStatus = parse(window.__nativeWakeWordRaw.stop()); return Promise.resolve(lastStatus); },\n" +
         "    getStatus: function(){ lastStatus = parse(window.__nativeWakeWordRaw.getStatus()); return lastStatus; }\n" +
         "  };\n" +

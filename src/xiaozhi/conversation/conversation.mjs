@@ -41,6 +41,11 @@ export class Conversation extends EventTarget {
     this._initialized = false;
     this._sendingFrames = false;
     this._autoSessionActive = false;
+    // Interrupt (portal setting, sent over the control connection): auto sessions
+    // keep the microphone on while the AI speaks
+    this.bargeIn = false;
+    this._listenThroughReplies = false;
+    this._ttsTurn = false; // between tts start and its stop/abort: TTS owns the mouth
     this._sttText = "";
     this._ttsText = "";
     this._connectionState = {
@@ -143,7 +148,10 @@ export class Conversation extends EventTarget {
 
     this.player = new AudioPlayer({ workletUrl: this.assetUrls.playbackWorklet });
     this.player.onRms((rms) => {
-      this.mouth.feedRms(rms);
+      // The worklet reports RMS all the time (zeros when idle); only a TTS turn
+      // may drive the mouth, or those zeros fight other speakers (portal audio).
+      // The turn, not the device state: a reply can start while listening starts.
+      if (this._ttsTurn) this.mouth.feedRms(rms);
     });
     await this.player.start();
 
@@ -238,7 +246,7 @@ export class Conversation extends EventTarget {
     }
     await this.stopListening();
     if (this.player) this.player.clear();
-    this.mouth.end();
+    this._endTtsMouth();
     this.state.setDevice(DeviceState.IDLE);
     if (disconnect) await this.disconnect();
     this._emitLog("info", "session ended; wake word remains active");
@@ -256,7 +264,7 @@ export class Conversation extends EventTarget {
       this._sendingFrames = false;
       await this.stopListening();
       if (this.player) this.player.clear();
-      this.mouth.end();
+      this._endTtsMouth();
       this.state.setDevice(DeviceState.IDLE);
       this._emitLog("warn", "remote session ended; returning to wake-word mode", {
         code: detail?.code,
@@ -326,9 +334,9 @@ export class Conversation extends EventTarget {
           return false;
         }
       }
-      // `listen/detect` is the Xiaozhi wake-word report, not a generic prompt
-      // endpoint. The server uses the detected phrase to start its greeting.
-      const reported = await this.sendText(word);
+      // Report the wake event explicitly (`wake: true`); the server answers
+      // with its greeting instead of treating the phrase as user input.
+      const reported = await this.sendText(word, { wake: true });
       if (!reported) {
         this._emitLog("warn", "wake-word report failed; continuing with microphone", { word });
       }
@@ -382,11 +390,18 @@ export class Conversation extends EventTarget {
     this.vad.reset();
     this._sendingFrames = true;
     if (mode === ListeningMode.AUTO_STOP) this._autoSessionActive = true;
+    // Interrupt (server setting): an auto session keeps the microphone on while
+    // the AI speaks ("realtime"); the server cuts the reply when it hears speech
+    this._listenThroughReplies = mode === ListeningMode.AUTO_STOP && this.bargeIn === true;
+    if (this._listenThroughReplies) this._emitLog("info", "interrupt on: listening while the AI speaks");
     this.state.setMode(mode);
-    this.state.setDevice(DeviceState.LISTENING);
+    // Listening through replies: a reply already playing stays "speaking"
+    if (!(this._listenThroughReplies && this.state.device === DeviceState.SPEAKING)) {
+      this.state.setDevice(DeviceState.LISTENING);
+    }
     this.protocol.sendStartListening(
-      mode === ListeningMode.AUTO_STOP ? "auto" :
-      mode === ListeningMode.REALTIME ? "realtime" : "manual"
+      this._listenThroughReplies || mode === ListeningMode.REALTIME ? "realtime" :
+      mode === ListeningMode.AUTO_STOP ? "auto" : "manual"
     );
     return true;
   }
@@ -395,6 +410,7 @@ export class Conversation extends EventTarget {
     console.log("[audio] stopListening, frames=" + this._dbgFrames + " packets=" + this._dbgPackets + " sent=" + this._dbgSent);
     this._emitLog("info", "stop listening");
     this._sendingFrames = false;
+    this._listenThroughReplies = false;
     if (this.encoder) await this.encoder.flush();
     if (this.protocol?.isOpen?.()) this.protocol.sendStopListening();
     if (this.capture) await this.capture.stop("conversation");
@@ -403,7 +419,7 @@ export class Conversation extends EventTarget {
     }
   }
 
-  async sendText(text) {
+  async sendText(text, { wake = false } = {}) {
     const normalizedText = typeof text === "string" ? text.trim() : "";
     if (!normalizedText) {
       this._emitLog("warn", "send text skipped: empty input");
@@ -435,7 +451,7 @@ export class Conversation extends EventTarget {
         }
       }
       try {
-        const sent = await this.protocol.sendDetectWord(normalizedText);
+        const sent = await this.protocol.sendDetectWord(normalizedText, { wake });
         if (!sent) throw new Error("websocket send failed");
         this._emitLog("info", "send text", { text: normalizedText, attempt });
         return true;
@@ -461,12 +477,22 @@ export class Conversation extends EventTarget {
     return false;
   }
 
+  _beginTtsMouth() {
+    this._ttsTurn = true;
+    this.mouth.begin();
+  }
+
+  _endTtsMouth() {
+    this._ttsTurn = false;
+    this.mouth.end();
+  }
+
   async abort(reason = AbortReason.USER_INTERRUPTION) {
     if (!this.protocol) return;
     this._emitLog("warn", "abort", { reason });
     this.protocol.sendAbort(reason);
     if (this.player) this.player.clear();
-    this.mouth.end();
+    this._endTtsMouth();
     this.state.setAborted(true);
     if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
   }
@@ -477,18 +503,25 @@ export class Conversation extends EventTarget {
     if (type === "tts") {
       const st = msg.state;
       if (st === "start") {
-        // In AUTO mode, server-initiated TTS means stop capturing.
+        // In AUTO mode, server-initiated TTS means stop capturing (unless the
+        // session listens through replies so speech can interrupt them)
         if (this.state.mode === ListeningMode.AUTO_STOP &&
-            this.state.device === DeviceState.LISTENING) {
+            this.state.device === DeviceState.LISTENING && !this._listenThroughReplies) {
           this.stopListening().catch(() => {});
         }
         this.state.setDevice(DeviceState.SPEAKING);
-        this.mouth.begin();
+        this._beginTtsMouth();
         if (this.player) this.player.resume();
       } else if (st === "stop") {
-        this.mouth.end();
-        // After TTS in auto mode, resume listening for the next turn.
-        if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
+        this._endTtsMouth();
+        if (this._listenThroughReplies && this._sendingFrames) {
+          // Still listening. A normal stop comes after playback finished; an
+          // interrupt comes at once, so drop the reply audio still buffered.
+          // No new listen start: it would reset the server's audio mid-sentence.
+          if (this.player) this.player.clear();
+          this.state.setDevice(DeviceState.LISTENING);
+        } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
+          // After TTS in auto mode, resume listening for the next turn.
           this.state.setDevice(DeviceState.IDLE);
           this.startListening(ListeningMode.AUTO_STOP).catch((e) =>
             console.warn("[audio] auto re-listen failed:", e));

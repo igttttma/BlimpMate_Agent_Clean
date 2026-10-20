@@ -88,7 +88,9 @@ const STORAGE_KEYS = [
   "xiaozhi.client_id",
   "xiaozhi.activation_status",
   "xiaozhi.ws_url",
-  "xiaozhi.ws_token"
+  "xiaozhi.ws_token",
+  "xiaozhi.ws_source_ota",
+  "blimpmate.backend_v1"
 ];
 
 // Block exposure until cache is hydrated so xiaozhi bootstrap sees stored ids.
@@ -136,15 +138,17 @@ const wakeWord = {
 // silently degrade to mock. Set it so they reach the real Flask port.
 bridge.hostServiceUrl = hostServiceUrl;
 
-// Xiaozhi endpoint / credential overrides (env -> renderer). Lets the operator
-// point at a self-hosted xiaozhi server (BM_XIAOZHI_OTA_URL) or inject a known
-// websocket endpoint + token (BM_XIAOZHI_WS_URL / BM_XIAOZHI_WS_TOKEN) to skip
-// the device-binding round-trip. All optional — empty falls back to the public
-// tenclass OTA flow.
+// Xiaozhi backend from .env (env -> renderer): a websocket endpoint + token
+// (BM_XIAOZHI_WS_URL / BM_XIAOZHI_WS_TOKEN) or an OTA endpoint
+// (BM_XIAOZHI_OTA_URL). A backend saved from the UI wins over these; with
+// neither, the renderer asks the operator on first launch.
 const xiaozhiConfig = {
   otaUrl: (process.env.BM_XIAOZHI_OTA_URL || "").trim() || null,
   wsUrl: (process.env.BM_XIAOZHI_WS_URL || "").trim() || null,
-  wsToken: (process.env.BM_XIAOZHI_WS_TOKEN || "").trim() || null
+  wsToken: (process.env.BM_XIAOZHI_WS_TOKEN || "").trim() || null,
+  // Video-call server (separate from xiaozhi); a config saved in the UI wins
+  videoChatUrl: (process.env.BM_VIDEO_CHAT_URL || "").trim() || null,
+  videoChatToken: (process.env.BM_VIDEO_CHAT_TOKEN || "").trim() || null
 };
 
 contextBridge.exposeInMainWorld("hostBridge", bridge);
@@ -170,13 +174,16 @@ ipcRenderer.on("blimpmate-host-audio-state", (_event, payload) => {
 // === Native WebSocket bridge ===
 // Exposes a minimal API the renderer's WsProtocol can use to open a WS in
 // the main process with custom headers.
+// Ids are prefixed per page load: a reload restarts the counter, and reusing
+// an id would route the old socket's late events into the new page.
+const _wsIdPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 let _nextWsId = 1;
 const _wsListeners = new Map();
 
 contextBridge.exposeInMainWorld("nativeWs", {
   available: true,
   async open(url, headers, onEvent) {
-    const id = _nextWsId++;
+    const id = `${_wsIdPrefix}-${_nextWsId++}`;
     _wsListeners.set(id, onEvent);
     const channel = `xz-ws-event-${id}`;
     const handler = (_e, payload) => {

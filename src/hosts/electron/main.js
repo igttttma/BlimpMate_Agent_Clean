@@ -794,7 +794,7 @@ function stopDisplayServer() {
   }
 }
 
-const SENSITIVE_KEYS = new Set(["xiaozhi.ws_token", "xiaozhi.hmac_key"]);
+const SENSITIVE_KEYS = new Set(["xiaozhi.ws_token", "xiaozhi.hmac_key", "blimpmate.backend_v1"]);
 
 const AUDIO_STATE_KEYS = {
   idle: "idle",
@@ -1847,10 +1847,30 @@ ipcMain.handle("xz-storage-remove", (_e, key) => {
 // process using the ws package and bridge messages over IPC.
 
 const wsSessions = new Map(); // id -> { ws, webContents }
+const wsTrackedContents = new WeakSet();
 
 function sendToRenderer(webContents, channel, payload) {
   if (!webContents || webContents.isDestroyed()) return;
   try { webContents.send(channel, payload); } catch {}
+}
+
+// A page reload or navigation leaves its sockets orphaned; close them so the
+// server releases the session instead of waiting for its idle timeout.
+function closeWsSessionsFor(webContents) {
+  for (const [id, s] of wsSessions) {
+    if (s.webContents !== webContents) continue;
+    wsSessions.delete(id);
+    try { s.ws.terminate(); } catch {}
+  }
+}
+
+function trackWsOwner(webContents) {
+  if (wsTrackedContents.has(webContents)) return;
+  wsTrackedContents.add(webContents);
+  webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) closeWsSessionsFor(webContents);
+  });
+  webContents.once("destroyed", () => closeWsSessionsFor(webContents));
 }
 
 ipcMain.handle("xz-ws-open", (event, { id, url, headers }) => {
@@ -1858,6 +1878,7 @@ ipcMain.handle("xz-ws-open", (event, { id, url, headers }) => {
     try { wsSessions.get(id).ws.terminate(); } catch {}
     wsSessions.delete(id);
   }
+  trackWsOwner(event.sender);
   const ws = new WebSocketLib(url, {
     headers,
     perMessageDeflate: false,
@@ -1885,7 +1906,7 @@ ipcMain.handle("xz-ws-open", (event, { id, url, headers }) => {
       code,
       reason: reason ? reason.toString("utf8") : ""
     });
-    wsSessions.delete(id);
+    if (wsSessions.get(id)?.ws === ws) wsSessions.delete(id);
   });
   ws.on("error", (err) => {
     sendToRenderer(event.sender, `xz-ws-event-${id}`, {
@@ -2163,6 +2184,19 @@ function createWindow() {
     emitHostAudioState();
   });
 }
+
+// The video-call server may use a self-signed certificate. Trust it only when
+// its fingerprint matches BM_VIDEO_CHAT_CERT_FINGERPRINT ("sha256/…", printed by
+// the server's `npm run cert`).
+app.on("certificate-error", (event, _webContents, _url, _error, certificate, callback) => {
+  const pinned = (process.env.BM_VIDEO_CHAT_CERT_FINGERPRINT || "").trim();
+  if (pinned && certificate?.fingerprint === pinned) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
+  callback(false);
+});
 
 app.on("second-instance", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;

@@ -1,4 +1,5 @@
-const ACTIVATION_URL = "xiaozhi.me";
+// The binding page comes from the server; there is no built-in default.
+const withScheme = (u) => (/^[a-z]+:\/\//i.test(u) ? u : `https://${u}`);
 
 export function createActivationDialog() {
   const overlay = document.createElement("div");
@@ -12,7 +13,7 @@ export function createActivationDialog() {
         <button type="button" class="xz-btn xz-btn-sm" id="xzCopyUrlBtn">Copy link</button>
       </div>
       <div class="xz-dialog-code" id="xzActivationCode"></div>
-      <div class="xz-dialog-hint">Open the link above and enter the code to finish pairing.<br/>This dialog closes after activation succeeds.</div>
+      <div class="xz-dialog-hint">Enter this code in your server's device console to finish pairing.<br/>This dialog closes after activation succeeds.</div>
       <div class="xz-dialog-progress" id="xzActivationProgress"></div>
       <div class="xz-dialog-error" id="xzActivationError" style="display:none;color:#f87171;font-size:13px;margin-top:6px"></div>
       <div class="xz-dialog-row">
@@ -38,10 +39,11 @@ export function createActivationDialog() {
   let onCancel = null;
   let onDone = null;
   let onRetry = null;
-  let verificationUrl = ACTIVATION_URL;
+  let verificationUrl = null;
 
   copyUrlBtn.addEventListener("click", () => {
-    const url = `https://${verificationUrl}`;
+    if (!verificationUrl) return;
+    const url = withScheme(verificationUrl);
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
         copyUrlBtn.textContent = "Copied";
@@ -67,11 +69,11 @@ export function createActivationDialog() {
 
   return {
     show(activation) {
-      verificationUrl = activation.url || activation.verification_url || ACTIVATION_URL;
+      verificationUrl = activation.url || activation.verification_url || null;
       msgEl.textContent = activation.message || "Follow the instructions to activate";
       codeEl.textContent = activation.code || "------";
-      urlEl.textContent = `https://${verificationUrl}`;
-      urlRow.style.display = "flex";
+      urlEl.textContent = verificationUrl ? withScheme(verificationUrl) : "";
+      urlRow.style.display = verificationUrl ? "flex" : "none";
       progressEl.textContent = "Waiting for activation...";
       errorEl.style.display = "none";
       retryBtn.style.display = "none";

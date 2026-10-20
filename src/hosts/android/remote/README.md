@@ -46,6 +46,10 @@ The setup screen (open "BlimpMate Remote") shows each item with its command.
 adb shell am start -n com.blimpmate.remote/.SetupActivity --es url wss://<host>:8443
 
 # Input control. Android 13 blocks turning this on in Settings for sideloaded apps.
+# Delete first: writing the same value again (e.g. after a reinstall) is not a
+# change, so Android doesn't bind the service. This also turns off any other
+# accessibility service on the device.
+adb shell settings delete secure enabled_accessibility_services
 adb shell settings put secure enabled_accessibility_services com.blimpmate.remote/.InputService
 adb shell settings put secure accessibility_enabled 1
 

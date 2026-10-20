@@ -158,7 +158,9 @@ public final class SetupActivity extends Activity {
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         s.append(line(input, "Input control (accessibility service)"));
         if (!input) {
-            s.append("    adb shell settings put secure enabled_accessibility_services ")
+            // Delete first: re-writing an unchanged value doesn't make Android bind the service
+            s.append("    adb shell settings delete secure enabled_accessibility_services\n")
+                    .append("    adb shell settings put secure enabled_accessibility_services ")
                     .append(pkg).append("/.InputService\n")
                     .append("    adb shell settings put secure accessibility_enabled 1\n");
         }

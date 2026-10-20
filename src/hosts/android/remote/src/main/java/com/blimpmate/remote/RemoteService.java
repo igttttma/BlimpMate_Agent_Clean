@@ -22,16 +22,8 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
-import org.webrtc.DefaultVideoDecoderFactory;
-import org.webrtc.DefaultVideoEncoderFactory;
-import org.webrtc.EglBase;
-import org.webrtc.PeerConnection;
-import org.webrtc.PeerConnectionFactory;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -39,10 +31,12 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+import okio.ByteString;
 
 /**
  * The agent: stays connected to the stream server (started at boot), and when
- * a viewer asks for the screen gets screen capture and runs a ScreenSession.
+ * a viewer asks for the screen gets screen capture and runs a ScreenSession,
+ * whose video packets and the viewer's input share this connection.
  * Everything runs on one session thread.
  */
 public final class RemoteService extends Service {
@@ -65,10 +59,7 @@ public final class RemoteService extends Service {
     private boolean connected;
     private long backoffMs = 1000;
     private Runnable reconnect;
-    private List<PeerConnection.IceServer> iceServers = new ArrayList<>();
 
-    private EglBase egl;
-    private PeerConnectionFactory factory;
     private MediaProjection projection;
     private ScreenSession session;
     private Runnable projectionTimeout;
@@ -151,11 +142,7 @@ public final class RemoteService extends Service {
 
     @Override
     public void onDestroy() {
-        handler.post(() -> {
-            disconnect("service stopped");
-            if (factory != null) factory.dispose();
-            if (egl != null) egl.release();
-        });
+        handler.post(() -> disconnect("service stopped"));
         getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
         getSystemService(DisplayManager.class).unregisterDisplayListener(displayListener);
         thread.quitSafely();
@@ -231,18 +218,20 @@ public final class RemoteService extends Service {
             case "welcome":
                 connected = true;
                 backoffMs = 1000;
-                iceServers = parseIceServers(msg.optJSONArray("iceServers"));
                 setStatus("Online");
                 sendInfo();
                 break;
             case "screen_start":
-                startSession();
+                startSession(msg.optString("preset", "medium"));
                 break;
             case "screen_stop":
                 stopSession(null);
                 break;
-            case "signal":
-                if (session != null && msg.optJSONObject("data") != null) session.onSignal(msg.optJSONObject("data"));
+            case "input":
+                if (session != null && msg.optJSONObject("data") != null) session.onInput(msg.optJSONObject("data"));
+                break;
+            case "keyframe":
+                if (session != null) session.requestKeyFrame();
                 break;
         }
     }
@@ -267,28 +256,9 @@ public final class RemoteService extends Service {
         } catch (Exception ignored) {}
     }
 
-    private static List<PeerConnection.IceServer> parseIceServers(JSONArray arr) {
-        List<PeerConnection.IceServer> out = new ArrayList<>();
-        if (arr == null) return out;
-        for (int i = 0; i < arr.length(); i++) {
-            JSONObject s = arr.optJSONObject(i);
-            if (s == null) continue;
-            List<String> urls = new ArrayList<>();
-            JSONArray u = s.optJSONArray("urls");
-            if (u != null) for (int k = 0; k < u.length(); k++) urls.add(u.optString(k));
-            else if (s.has("urls")) urls.add(s.optString("urls"));
-            if (urls.isEmpty()) continue;
-            PeerConnection.IceServer.Builder b = PeerConnection.IceServer.builder(urls);
-            if (s.has("username")) b.setUsername(s.optString("username"));
-            if (s.has("credential")) b.setPassword(s.optString("credential"));
-            out.add(b.createIceServer());
-        }
-        return out;
-    }
-
     // ---- screen sessions (session thread) ----
 
-    private void startSession() {
+    private void startSession(String preset) {
         stopSession(null);
         int seq = ++sessionSeq;
         setStatus("Viewer connecting");
@@ -301,13 +271,13 @@ public final class RemoteService extends Service {
         };
         handler.postDelayed(projectionTimeout, PROJECTION_TIMEOUT_MS);
         try {
-            ProjectionActivity.request(this, (code, data) -> handler.post(() -> onProjection(seq, code, data)));
+            ProjectionActivity.request(this, (code, data) -> handler.post(() -> onProjection(seq, preset, code, data)));
         } catch (Exception e) {
             failSession("Couldn't ask for screen capture: " + e.getMessage());
         }
     }
 
-    private void onProjection(int seq, int code, Intent data) {
+    private void onProjection(int seq, String preset, int code, Intent data) {
         if (seq != sessionSeq) return;
         handler.removeCallbacks(projectionTimeout);
         if (code != Activity.RESULT_OK || data == null) {
@@ -333,12 +303,22 @@ public final class RemoteService extends Service {
                 });
             }
         }, handler);
-        ensureFactory();
-        session = new ScreenSession(this, handler, factory, egl, projection, iceServers, new ScreenSession.Listener() {
+        WebSocket socket = ws;
+        session = new ScreenSession(this, handler, projection, preset, new ScreenSession.Listener() {
             @Override
-            public void sendSignal(JSONObject d) {
+            public boolean sendVideo(byte[] packet) {
+                return socket != null && socket.send(ByteString.of(packet));
+            }
+
+            @Override
+            public long backlog() {
+                return socket == null ? 0 : socket.queueSize();
+            }
+
+            @Override
+            public void sendToViewer(JSONObject message) {
                 try {
-                    send(new JSONObject().put("type", "signal").put("data", d));
+                    send(new JSONObject().put("type", "viewer").put("data", message));
                 } catch (Exception ignored) {}
             }
 
@@ -378,17 +358,6 @@ public final class RemoteService extends Service {
         }
         releaseWakeLock();
         if (connected) setStatus(error == null ? "Online" : "Online (last session: " + error + ")");
-    }
-
-    private void ensureFactory() {
-        if (factory != null) return;
-        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(getApplicationContext())
-                .createInitializationOptions());
-        egl = EglBase.create();
-        factory = PeerConnectionFactory.builder()
-                .setVideoEncoderFactory(new DefaultVideoEncoderFactory(egl.getEglBaseContext(), true, true))
-                .setVideoDecoderFactory(new DefaultVideoDecoderFactory(egl.getEglBaseContext()))
-                .createPeerConnectionFactory();
     }
 
     private String openBlimpApp() {

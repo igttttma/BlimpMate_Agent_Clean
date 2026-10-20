@@ -63,8 +63,6 @@ android {
 dependencies {
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
-    // Prebuilt Google WebRTC (org.webrtc): peer connection, encoders, data channel
-    implementation "io.getstream:stream-webrtc-android:1.3.10"
 }
 
 tasks.register("syncCert", Sync) {

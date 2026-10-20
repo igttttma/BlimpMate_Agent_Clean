@@ -16,14 +16,18 @@ permission on every session, which this agent doesn't handle.
   first device and refuses others), reconnecting with backoff and immediately
   when a network comes up.
 - When a viewer asks for the screen it gets screen capture (no dialog once the
-  `PROJECT_MEDIA` app-op is granted), mirrors the screen into a WebRTC video track
-  and opens an `input` data channel. Capture stops when the viewer leaves; the
-  status bar's cast icon shows while someone watches, and the screen is kept on.
+  `PROJECT_MEDIA` app-op is granted) and encodes it with the device's hardware
+  H.264 encoder (`ScreenEncoder`, adapted from scrcpy's `SurfaceEncoder`,
+  Apache-2.0): the virtual display renders straight into the encoder's input
+  surface, with no copy, and the encoder repeats the last frame when the screen
+  is still. Capture stops when the viewer leaves; the status bar's cast icon
+  shows while someone watches, and the screen is kept on.
+- The video packets and the viewer's input share the one WebSocket to the stream
+  server, which passes them on; the viewer decodes with WebCodecs. When the
+  connection backs up, frames are dropped until the next keyframe.
 - Input goes through the accessibility service `InputService`: gestures
   (replayed with their timing), Back/Home/Recents/Notifications, and text typed
   into the focused field (native fields and web pages).
-- Video and input go peer to peer, or through TURN; the server only relays the
-  connection setup.
 
 ## Build and install
 

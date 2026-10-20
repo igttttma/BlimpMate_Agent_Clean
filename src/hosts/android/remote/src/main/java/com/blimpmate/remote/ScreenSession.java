@@ -4,51 +4,44 @@ import android.content.Context;
 import android.graphics.Point;
 import android.media.projection.MediaProjection;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.webrtc.DataChannel;
-import org.webrtc.EglBase;
-import org.webrtc.IceCandidate;
-import org.webrtc.MediaConstraints;
-import org.webrtc.MediaStream;
-import org.webrtc.MediaStreamTrack;
-import org.webrtc.PeerConnection;
-import org.webrtc.PeerConnectionFactory;
-import org.webrtc.RTCStats;
-import org.webrtc.RtpCapabilities;
-import org.webrtc.RtpParameters;
-import org.webrtc.RtpReceiver;
-import org.webrtc.RtpSender;
-import org.webrtc.RtpTransceiver;
-import org.webrtc.SdpObserver;
-import org.webrtc.SessionDescription;
-import org.webrtc.SurfaceTextureHelper;
-import org.webrtc.VideoSource;
-import org.webrtc.VideoTrack;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 /**
- * One viewer's session: the screen as a WebRTC video track (this side sends
- * the offer) and an "input" data channel for the viewer's taps, keys and text.
- * All methods run on the service's session thread.
+ * One viewer's session: the screen as hardware-encoded H.264 (ScreenEncoder,
+ * scrcpy's approach) sent as binary packets over the agent's connection to the
+ * stream server, and the viewer's taps, keys and text coming back over it.
+ * All methods run on the service's session thread, except the encoder's
+ * packet callback.
  */
 final class ScreenSession {
     private static final String TAG = "ScreenSession";
-    // The viewer ends the session if ICE stays disconnected this long
-    private static final long DISCONNECT_GRACE_MS = 10_000;
-    // How often the viewer gets the encoder's stats (codec, hardware or not, what limits it)
+    // How often the viewer gets the encoder's stats
     private static final long STATS_MS = 2_000;
+    // More than this waiting in the connection: drop frames until a keyframe,
+    // so the picture stays current instead of falling behind
+    private static final long MAX_BACKLOG_BYTES = 1024 * 1024;
+    // Packet header: flags, then the presentation time (see the stream server's screen.mjs)
+    private static final int FLAG_CONFIG = 1;
+    private static final int FLAG_KEY = 2;
 
     interface Listener {
-        void sendSignal(JSONObject data);
+        /** Sends a binary video packet; false when not connected. */
+        boolean sendVideo(byte[] packet);
+
+        /** Bytes still waiting to go out on the connection. */
+        long backlog();
+
+        /** A message for the viewer (ack, stats). */
+        void sendToViewer(JSONObject message);
+
         void onFailed(String error);
+
         /** Brings the Blimp app to the front; null on success. */
         String openBlimpApp();
     }
@@ -65,158 +58,142 @@ final class ScreenSession {
 
         static Quality of(String preset) {
             switch (preset) {
-                case "low": return new Quality(854, 15, 800);
-                case "high": return new Quality(1920, 30, 6000);
-                default: return new Quality(1280, 30, 2500);
+                case "low": return new Quality(854, 30, 1000);
+                case "high": return new Quality(1920, 60, 8000);
+                default: return new Quality(1280, 60, 4000);
             }
         }
     }
 
     private final Context context;
     private final Handler thread;
-    private final PeerConnectionFactory factory;
-    private final EglBase egl;
-    private final MediaProjection projection;
-    private final List<PeerConnection.IceServer> iceServers;
     private final Listener listener;
-
-    private SurfaceTextureHelper helper;
-    private ProjectionCapturer capturer;
-    private VideoSource source;
-    private PeerConnection pc;
-    private RtpSender sender;
-    private DataChannel channel;
-    private Quality quality = Quality.of("medium");
-    private int[] captureSize;
-    private final List<IceCandidate> pendingCandidates = new ArrayList<>();
+    private final ScreenEncoder encoder;
+    private Quality quality;
+    private int[] frameSize;
     private boolean closed;
-    private Runnable disconnectTimer;
+    // Encoder thread: set after frames were dropped, cleared by the next keyframe
+    private volatile boolean waitKey;
+    private volatile int framesSent;
+    private volatile long bytesSent;
+    private int lastFrames;
+    private long lastBytes;
+    private long lastStatsAt;
 
-    ScreenSession(Context context, Handler thread, PeerConnectionFactory factory, EglBase egl,
-                  MediaProjection projection, List<PeerConnection.IceServer> iceServers, Listener listener) {
+    ScreenSession(Context context, Handler thread, MediaProjection projection, String preset, Listener listener) {
         this.context = context;
         this.thread = thread;
-        this.factory = factory;
-        this.egl = egl;
-        this.projection = projection;
-        this.iceServers = iceServers;
         this.listener = listener;
+        this.quality = Quality.of(preset);
+        int dpi = context.getResources().getDisplayMetrics().densityDpi;
+        this.encoder = new ScreenEncoder(projection, dpi, new ScreenEncoder.Sink() {
+            @Override
+            public void onPacket(ByteBuffer data, boolean config, boolean key, long ptsUs) {
+                onEncoded(data, config, key, ptsUs);
+            }
+
+            @Override
+            public void onError(String error) {
+                thread.post(() -> {
+                    if (!closed) listener.onFailed(error);
+                });
+            }
+        });
     }
 
     void start() {
-        // Aligned timestamps: the same clock as the capturer's re-sent frames
-        helper = SurfaceTextureHelper.create("ScreenCapture", egl.getEglBaseContext(), true);
-        capturer = new ProjectionCapturer(projection, context.getResources().getDisplayMetrics().densityDpi);
-        source = factory.createVideoSource(true);
-        capturer.initialize(helper, context, source.getCapturerObserver());
-        captureSize = frameSize();
-        capturer.startCapture(captureSize[0], captureSize[1], quality.fps);
-        VideoTrack track = factory.createVideoTrack("screen", source);
-
-        PeerConnection.RTCConfiguration config = new PeerConnection.RTCConfiguration(iceServers);
-        config.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
-        pc = factory.createPeerConnection(config, new PcObserver());
-        if (pc == null) {
-            listener.onFailed("Could not create the WebRTC connection");
-            return;
-        }
-        sender = pc.addTrack(track, Collections.singletonList("screen"));
-        for (RtpTransceiver t : pc.getTransceivers()) {
-            t.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY);
-            if (t.getMediaType() == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) preferH264(t);
-        }
-        applyEncoding();
-
-        DataChannel.Init init = new DataChannel.Init();
-        init.ordered = true;
-        channel = pc.createDataChannel("input", init);
-        channel.registerObserver(new ChannelObserver());
+        restartEncoder();
+        lastStatsAt = SystemClock.elapsedRealtime();
         thread.postDelayed(statsTick, STATS_MS);
-
-        pc.createOffer(new SdpAdapter("create offer") {
-            @Override
-            public void onCreateSuccess(SessionDescription offer) {
-                thread.post(() -> {
-                    if (closed) return;
-                    pc.setLocalDescription(new SdpAdapter("set offer"), offer);
-                    listener.sendSignal(description(offer));
-                });
-            }
-        }, new MediaConstraints());
-    }
-
-    /** A signal from the viewer: its answer, or an ICE candidate. */
-    void onSignal(JSONObject data) {
-        if (closed || pc == null) return;
-        JSONObject d = data.optJSONObject("description");
-        JSONObject c = data.optJSONObject("candidate");
-        if (d != null && "answer".equals(d.optString("type"))) {
-            SessionDescription answer = new SessionDescription(SessionDescription.Type.ANSWER, d.optString("sdp"));
-            pc.setRemoteDescription(new SdpAdapter("set answer") {
-                @Override
-                public void onSetSuccess() {
-                    thread.post(() -> {
-                        if (closed) return;
-                        for (IceCandidate ic : pendingCandidates) pc.addIceCandidate(ic);
-                        pendingCandidates.clear();
-                    });
-                }
-            }, answer);
-        } else if (c != null && !c.optString("candidate").isEmpty()) {
-            IceCandidate ic = new IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate"));
-            if (pc.getRemoteDescription() == null) pendingCandidates.add(ic);
-            else pc.addIceCandidate(ic);
-        }
-    }
-
-    /** The screen turned: capture the new orientation. */
-    void onScreenSizeChanged() {
-        if (closed || capturer == null) return;
-        int[] size = frameSize();
-        if (size[0] == captureSize[0] && size[1] == captureSize[1]) return;
-        captureSize = size;
-        capturer.changeCaptureFormat(size[0], size[1], quality.fps);
     }
 
     void close() {
         if (closed) return;
         closed = true;
-        if (disconnectTimer != null) thread.removeCallbacks(disconnectTimer);
         thread.removeCallbacks(statsTick);
-        if (channel != null) {
-            channel.unregisterObserver();
-            channel.close();
-            channel.dispose();
-            channel = null;
-        }
-        if (pc != null) {
-            pc.dispose();
-            pc = null;
-        }
-        if (capturer != null) {
-            capturer.stopCapture();
-            capturer.dispose();
-            capturer = null;
-        }
-        if (source != null) {
-            source.dispose();
-            source = null;
-        }
-        if (helper != null) {
-            helper.dispose();
-            helper = null;
+        encoder.release();
+    }
+
+    /** The screen turned: encode the new orientation. */
+    void onScreenSizeChanged() {
+        if (closed) return;
+        int[] size = computeFrameSize();
+        if (size[0] == frameSize[0] && size[1] == frameSize[1]) return;
+        restartEncoder();
+    }
+
+    /** The viewer (or the server, for a viewer that fell behind) needs a keyframe. */
+    void requestKeyFrame() {
+        if (!closed) encoder.requestKeyFrame();
+    }
+
+    private void restartEncoder() {
+        frameSize = computeFrameSize();
+        waitKey = false;
+        try {
+            encoder.start(frameSize[0], frameSize[1], quality.fps, quality.kbps * 1000);
+        } catch (Exception e) {
+            Log.w(TAG, "encoder start failed", e);
+            listener.onFailed("Couldn't start the screen encoder: " + e.getMessage());
         }
     }
 
-    // ---- quality ----
+    // ---- packets (encoder thread) ----
 
-    /** The frame size: the screen's shape, its long side capped by the preset, even numbers. */
-    private int[] frameSize() {
+    private void onEncoded(ByteBuffer data, boolean config, boolean key, long ptsUs) {
+        boolean essential = config || key;
+        if (!essential && (waitKey || listener.backlog() > MAX_BACKLOG_BYTES)) {
+            if (!waitKey) {
+                waitKey = true;
+                encoder.requestKeyFrame();
+            }
+            return;
+        }
+        if (key) waitKey = false;
+        byte[] packet = new byte[9 + data.remaining()];
+        packet[0] = (byte) ((config ? FLAG_CONFIG : 0) | (key ? FLAG_KEY : 0));
+        ByteBuffer.wrap(packet, 1, 8).putLong(ptsUs);
+        data.get(packet, 9, data.remaining());
+        if (listener.sendVideo(packet) && !config) {
+            framesSent++;
+            bytesSent += packet.length;
+        }
+    }
+
+    // ---- stats for the viewer ----
+
+    private final Runnable statsTick = new Runnable() {
+        @Override
+        public void run() {
+            if (closed) return;
+            long now = SystemClock.elapsedRealtime();
+            double seconds = Math.max(0.001, (now - lastStatsAt) / 1000.0);
+            int frames = framesSent;
+            long bytes = bytesSent;
+            try {
+                listener.sendToViewer(new JSONObject()
+                        .put("t", "stats")
+                        .put("encoder", encoder.encoderName())
+                        .put("fps", Math.round((frames - lastFrames) / seconds))
+                        .put("kbps", Math.round((bytes - lastBytes) * 8 / 1000.0 / seconds)));
+            } catch (Exception ignored) {}
+            lastFrames = frames;
+            lastBytes = bytes;
+            lastStatsAt = now;
+            thread.postDelayed(this, STATS_MS);
+        }
+    };
+
+    // ---- frame size ----
+
+    /** The frame size: the screen's shape, its long side capped by the preset, multiples of 16. */
+    private int[] computeFrameSize() {
         Point screen = screenSize();
         int longest = Math.max(screen.x, screen.y);
         float scale = Math.min(1f, quality.longSide / (float) longest);
-        int w = Math.round(screen.x * scale) & ~1;
-        int h = Math.round(screen.y * scale) & ~1;
+        // Encoders want aligned sizes; 16 suits every H.264 encoder
+        int w = Math.max(16, Math.round(screen.x * scale / 16f) * 16);
+        int h = Math.max(16, Math.round(screen.y * scale / 16f) * 16);
         return new int[] {w, h};
     }
 
@@ -230,103 +207,21 @@ final class ScreenSession {
         return size;
     }
 
-    private void setQuality(String preset) {
-        quality = Quality.of(preset);
-        applyEncoding();
-        captureSize = frameSize();
-        capturer.changeCaptureFormat(captureSize[0], captureSize[1], quality.fps);
-    }
-
-    /**
-     * H.264 first: Android devices encode it in hardware (MediaCodec), while VP8,
-     * WebRTC's default, usually falls back to software on the CPU and drops frames.
-     * The other codecs stay listed as fallbacks.
-     */
-    private void preferH264(RtpTransceiver transceiver) {
-        List<RtpCapabilities.CodecCapability> codecs = new ArrayList<>();
-        List<RtpCapabilities.CodecCapability> others = new ArrayList<>();
-        for (RtpCapabilities.CodecCapability c :
-                factory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO).codecs) {
-            ("H264".equalsIgnoreCase(c.name) ? codecs : others).add(c);
-        }
-        if (codecs.isEmpty()) {
-            Log.w(TAG, "No hardware H.264 encoder on this device; WebRTC picks the codec");
-            return;
-        }
-        codecs.addAll(others);
-        transceiver.setCodecPreferences(codecs);
-    }
-
-    // ---- encoder stats for the viewer ----
-
-    private final Runnable statsTick = new Runnable() {
-        @Override
-        public void run() {
-            if (closed) return;
-            sendStats();
-            thread.postDelayed(this, STATS_MS);
-        }
-    };
-
-    // Encoder totals at the previous report, for the average time per frame since
-    private double lastEncodeSeconds;
-    private long lastFramesEncoded;
-
-    private void sendStats() {
-        pc.getStats(report -> {
-            JSONObject stats = new JSONObject();
-            try {
-                for (RTCStats s : report.getStatsMap().values()) {
-                    java.util.Map<String, Object> m = s.getMembers();
-                    if ("media-source".equals(s.getType()) && "video".equals(m.get("kind"))) {
-                        // Frames per second coming from the screen capture
-                        if (m.get("framesPerSecond") != null) stats.put("captured", m.get("framesPerSecond"));
-                        continue;
-                    }
-                    if (!"outbound-rtp".equals(s.getType()) || !"video".equals(m.get("kind"))) continue;
-                    stats.put("t", "stats");
-                    stats.put("encoder", String.valueOf(m.get("encoderImplementation")));
-                    stats.put("limit", String.valueOf(m.get("qualityLimitationReason")));
-                    if (m.get("framesPerSecond") != null) stats.put("fps", m.get("framesPerSecond"));
-                    if (m.get("totalEncodeTime") instanceof Number && m.get("framesEncoded") instanceof Number) {
-                        double seconds = ((Number) m.get("totalEncodeTime")).doubleValue();
-                        long frames = ((Number) m.get("framesEncoded")).longValue();
-                        if (frames > lastFramesEncoded) {
-                            stats.put("encode_ms", Math.round(1000 * (seconds - lastEncodeSeconds) / (frames - lastFramesEncoded)));
-                        }
-                        lastEncodeSeconds = seconds;
-                        lastFramesEncoded = frames;
-                    }
-                    RTCStats codec = report.getStatsMap().get(String.valueOf(m.get("codecId")));
-                    if (codec != null) stats.put("codec", String.valueOf(codec.getMembers().get("mimeType")));
-                }
-            } catch (Exception ignored) {}
-            if (stats.has("t")) thread.post(() -> send(stats));
-        });
-    }
-
-    private void applyEncoding() {
-        if (sender == null) return;
-        RtpParameters params = sender.getParameters();
-        // Text and UI stay sharp; on a slow link the frame rate drops instead
-        params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION;
-        for (RtpParameters.Encoding e : params.encodings) {
-            e.maxBitrateBps = quality.kbps * 1000;
-            e.maxFramerate = quality.fps;
-        }
-        sender.setParameters(params);
-    }
-
     // ---- input from the viewer ----
 
-    private void onInput(JSONObject m) {
+    void onInput(JSONObject m) {
+        if (closed) return;
         int id = m.optInt("id");
         String t = m.optString("t");
         InputService input = InputService.get();
         InputService.Done ack = (error) -> thread.post(() -> sendAck(id, error));
         switch (t) {
+            case "keyframe":
+                encoder.requestKeyFrame();
+                return;
             case "quality":
-                setQuality(m.optString("preset", "medium"));
+                quality = Quality.of(m.optString("preset", "medium"));
+                restartEncoder();
                 sendAck(id, null);
                 return;
             case "key":
@@ -371,130 +266,11 @@ final class ScreenSession {
     }
 
     private void sendAck(int id, String error) {
-        JSONObject ack = new JSONObject();
+        if (closed) return;
         try {
-            ack.put("t", "ack");
-            ack.put("id", id);
-            ack.put("ok", error == null);
+            JSONObject ack = new JSONObject().put("t", "ack").put("id", id).put("ok", error == null);
             if (error != null) ack.put("error", error);
+            listener.sendToViewer(ack);
         } catch (Exception ignored) {}
-        send(ack);
-    }
-
-    private void send(JSONObject message) {
-        if (closed || channel == null || channel.state() != DataChannel.State.OPEN) return;
-        byte[] bytes = message.toString().getBytes(StandardCharsets.UTF_8);
-        channel.send(new DataChannel.Buffer(ByteBuffer.wrap(bytes), false));
-    }
-
-    // ---- WebRTC callbacks (on WebRTC's threads; moved to the session thread) ----
-
-    private static JSONObject description(SessionDescription sd) {
-        JSONObject d = new JSONObject();
-        try {
-            JSONObject desc = new JSONObject();
-            desc.put("type", sd.type.canonicalForm());
-            desc.put("sdp", sd.description);
-            d.put("description", desc);
-        } catch (Exception ignored) {}
-        return d;
-    }
-
-    private final class PcObserver implements PeerConnection.Observer {
-        @Override
-        public void onIceCandidate(IceCandidate c) {
-            JSONObject data = new JSONObject();
-            try {
-                JSONObject cand = new JSONObject();
-                cand.put("candidate", c.sdp);
-                cand.put("sdpMid", c.sdpMid);
-                cand.put("sdpMLineIndex", c.sdpMLineIndex);
-                data.put("candidate", cand);
-            } catch (Exception ignored) {}
-            thread.post(() -> {
-                if (!closed) listener.sendSignal(data);
-            });
-        }
-
-        @Override
-        public void onConnectionChange(PeerConnection.PeerConnectionState state) {
-            Log.i(TAG, "connection " + state);
-            thread.post(() -> {
-                if (closed) return;
-                if (disconnectTimer != null) {
-                    thread.removeCallbacks(disconnectTimer);
-                    disconnectTimer = null;
-                }
-                if (state == PeerConnection.PeerConnectionState.FAILED) {
-                    listener.onFailed("The connection to the viewer failed");
-                } else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) {
-                    disconnectTimer = () -> {
-                        if (!closed) listener.onFailed("The connection to the viewer was lost");
-                    };
-                    thread.postDelayed(disconnectTimer, DISCONNECT_GRACE_MS);
-                }
-            });
-        }
-
-        @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
-        @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) {}
-        @Override public void onIceConnectionReceivingChange(boolean receiving) {}
-        @Override public void onIceGatheringChange(PeerConnection.IceGatheringState s) {}
-        @Override public void onIceCandidatesRemoved(IceCandidate[] candidates) {}
-        @Override public void onAddStream(MediaStream stream) {}
-        @Override public void onRemoveStream(MediaStream stream) {}
-        @Override public void onDataChannel(DataChannel dc) {}
-        @Override public void onRenegotiationNeeded() {}
-        @Override public void onAddTrack(RtpReceiver receiver, MediaStream[] streams) {}
-    }
-
-    private final class ChannelObserver implements DataChannel.Observer {
-        @Override
-        public void onMessage(DataChannel.Buffer buffer) {
-            if (buffer.binary) return;
-            ByteBuffer data = buffer.data;
-            byte[] bytes = new byte[data.remaining()];
-            data.get(bytes);
-            String text = new String(bytes, StandardCharsets.UTF_8);
-            thread.post(() -> {
-                if (closed) return;
-                try {
-                    onInput(new JSONObject(text));
-                } catch (Exception e) {
-                    Log.w(TAG, "bad input message", e);
-                }
-            });
-        }
-
-        @Override public void onBufferedAmountChange(long previous) {}
-        @Override public void onStateChange() {}
-    }
-
-    private class SdpAdapter implements SdpObserver {
-        private final String what;
-
-        SdpAdapter(String what) {
-            this.what = what;
-        }
-
-        @Override public void onCreateSuccess(SessionDescription sd) {}
-        @Override public void onSetSuccess() {}
-
-        @Override
-        public void onCreateFailure(String error) {
-            fail(error);
-        }
-
-        @Override
-        public void onSetFailure(String error) {
-            fail(error);
-        }
-
-        private void fail(String error) {
-            Log.e(TAG, what + " failed: " + error);
-            thread.post(() -> {
-                if (!closed) listener.onFailed("WebRTC: " + what + " failed: " + error);
-            });
-        }
     }
 }

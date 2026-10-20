@@ -13,8 +13,11 @@ import org.webrtc.EglBase;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
+import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
+import org.webrtc.RTCStats;
+import org.webrtc.RtpCapabilities;
 import org.webrtc.RtpParameters;
 import org.webrtc.RtpReceiver;
 import org.webrtc.RtpSender;
@@ -40,6 +43,8 @@ final class ScreenSession {
     private static final String TAG = "ScreenSession";
     // The viewer ends the session if ICE stays disconnected this long
     private static final long DISCONNECT_GRACE_MS = 10_000;
+    // How often the viewer gets the encoder's stats (codec, hardware or not, what limits it)
+    private static final long STATS_MS = 2_000;
 
     interface Listener {
         void sendSignal(JSONObject data);
@@ -118,6 +123,7 @@ final class ScreenSession {
         sender = pc.addTrack(track, Collections.singletonList("screen"));
         for (RtpTransceiver t : pc.getTransceivers()) {
             t.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY);
+            if (t.getMediaType() == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) preferH264(t);
         }
         applyEncoding();
 
@@ -125,6 +131,7 @@ final class ScreenSession {
         init.ordered = true;
         channel = pc.createDataChannel("input", init);
         channel.registerObserver(new ChannelObserver());
+        thread.postDelayed(statsTick, STATS_MS);
 
         pc.createOffer(new SdpAdapter("create offer") {
             @Override
@@ -175,6 +182,7 @@ final class ScreenSession {
         if (closed) return;
         closed = true;
         if (disconnectTimer != null) thread.removeCallbacks(disconnectTimer);
+        thread.removeCallbacks(statsTick);
         if (channel != null) {
             channel.unregisterObserver();
             channel.close();
@@ -227,6 +235,56 @@ final class ScreenSession {
         applyEncoding();
         captureSize = frameSize();
         capturer.changeCaptureFormat(captureSize[0], captureSize[1], quality.fps);
+    }
+
+    /**
+     * H.264 first: Android devices encode it in hardware (MediaCodec), while VP8,
+     * WebRTC's default, usually falls back to software on the CPU and drops frames.
+     * The other codecs stay listed as fallbacks.
+     */
+    private void preferH264(RtpTransceiver transceiver) {
+        List<RtpCapabilities.CodecCapability> codecs = new ArrayList<>();
+        List<RtpCapabilities.CodecCapability> others = new ArrayList<>();
+        for (RtpCapabilities.CodecCapability c :
+                factory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO).codecs) {
+            ("H264".equalsIgnoreCase(c.name) ? codecs : others).add(c);
+        }
+        if (codecs.isEmpty()) {
+            Log.w(TAG, "No hardware H.264 encoder on this device; WebRTC picks the codec");
+            return;
+        }
+        codecs.addAll(others);
+        transceiver.setCodecPreferences(codecs);
+    }
+
+    // ---- encoder stats for the viewer ----
+
+    private final Runnable statsTick = new Runnable() {
+        @Override
+        public void run() {
+            if (closed) return;
+            sendStats();
+            thread.postDelayed(this, STATS_MS);
+        }
+    };
+
+    private void sendStats() {
+        pc.getStats(report -> {
+            JSONObject stats = new JSONObject();
+            try {
+                for (RTCStats s : report.getStatsMap().values()) {
+                    if (!"outbound-rtp".equals(s.getType()) || !"video".equals(s.getMembers().get("kind"))) continue;
+                    java.util.Map<String, Object> m = s.getMembers();
+                    stats.put("t", "stats");
+                    stats.put("encoder", String.valueOf(m.get("encoderImplementation")));
+                    stats.put("limit", String.valueOf(m.get("qualityLimitationReason")));
+                    if (m.get("framesPerSecond") != null) stats.put("fps", m.get("framesPerSecond"));
+                    RTCStats codec = report.getStatsMap().get(String.valueOf(m.get("codecId")));
+                    if (codec != null) stats.put("codec", String.valueOf(codec.getMembers().get("mimeType")));
+                }
+            } catch (Exception ignored) {}
+            if (stats.length() > 0) thread.post(() -> send(stats));
+        });
     }
 
     private void applyEncoding() {
@@ -295,7 +353,6 @@ final class ScreenSession {
     }
 
     private void sendAck(int id, String error) {
-        if (closed || channel == null || channel.state() != DataChannel.State.OPEN) return;
         JSONObject ack = new JSONObject();
         try {
             ack.put("t", "ack");
@@ -303,7 +360,12 @@ final class ScreenSession {
             ack.put("ok", error == null);
             if (error != null) ack.put("error", error);
         } catch (Exception ignored) {}
-        byte[] bytes = ack.toString().getBytes(StandardCharsets.UTF_8);
+        send(ack);
+    }
+
+    private void send(JSONObject message) {
+        if (closed || channel == null || channel.state() != DataChannel.State.OPEN) return;
+        byte[] bytes = message.toString().getBytes(StandardCharsets.UTF_8);
         channel.send(new DataChannel.Buffer(ByteBuffer.wrap(bytes), false));
     }
 

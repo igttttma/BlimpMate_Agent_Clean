@@ -25,9 +25,6 @@ import org.webrtc.VideoSink;
  */
 final class ProjectionCapturer implements VideoCapturer, VideoSink {
     private static final long REPEAT_MS = 500;
-    // A frame this long after the previous one starts a still period (or is a
-    // lone change) and is kept as a CPU copy; frames of an animation aren't
-    private static final long STILL_GAP_MS = 100;
 
     private final MediaProjection projection;
     private final int densityDpi;
@@ -38,6 +35,8 @@ final class ProjectionCapturer implements VideoCapturer, VideoSink {
     private VideoFrame.I420Buffer lastCopy;
     private int lastRotation;
     private long lastFrameMs;
+    // Set once the screen went still: the next frame is kept as a CPU copy
+    private boolean wantCopy;
     private boolean running;
 
     ProjectionCapturer(MediaProjection projection, int densityDpi) {
@@ -107,14 +106,15 @@ final class ProjectionCapturer implements VideoCapturer, VideoSink {
     // On the helper's thread
     @Override
     public void onFrame(VideoFrame frame) {
-        long now = SystemClock.elapsedRealtime();
-        boolean afterGap = now - lastFrameMs >= STILL_GAP_MS;
-        lastFrameMs = now;
+        lastFrameMs = SystemClock.elapsedRealtime();
         observer.onFrameCaptured(frame);
         // The copy must always be the latest frame. A texture frame can't be
         // held (the helper waits for its release before delivering the next).
         releaseCopy();
-        if (afterGap) {
+        // Copying (GPU readback + conversion) is slow on weak devices: only the
+        // one frame asked for once the screen is still, never while it changes
+        if (wantCopy) {
+            wantCopy = false;
             lastCopy = frame.getBuffer().toI420();
             lastRotation = frame.getRotation();
         }
@@ -132,9 +132,10 @@ final class ProjectionCapturer implements VideoCapturer, VideoSink {
                 observer.onFrameCaptured(frame);
                 frame.release();
                 lastFrameMs = now;
-            } else if (display != null) {
-                // Still since an animation ended: a new virtual display draws
-                // the screen once more, and that frame is kept
+            } else if (display != null && !wantCopy) {
+                // Still and nothing kept yet: a new virtual display draws the
+                // screen once more, and that frame is kept
+                wantCopy = true;
                 display.release();
                 display = createDisplay();
             }

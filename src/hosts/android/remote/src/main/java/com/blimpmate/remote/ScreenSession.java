@@ -268,22 +268,40 @@ final class ScreenSession {
         }
     };
 
+    // Encoder totals at the previous report, for the average time per frame since
+    private double lastEncodeSeconds;
+    private long lastFramesEncoded;
+
     private void sendStats() {
         pc.getStats(report -> {
             JSONObject stats = new JSONObject();
             try {
                 for (RTCStats s : report.getStatsMap().values()) {
-                    if (!"outbound-rtp".equals(s.getType()) || !"video".equals(s.getMembers().get("kind"))) continue;
                     java.util.Map<String, Object> m = s.getMembers();
+                    if ("media-source".equals(s.getType()) && "video".equals(m.get("kind"))) {
+                        // Frames per second coming from the screen capture
+                        if (m.get("framesPerSecond") != null) stats.put("captured", m.get("framesPerSecond"));
+                        continue;
+                    }
+                    if (!"outbound-rtp".equals(s.getType()) || !"video".equals(m.get("kind"))) continue;
                     stats.put("t", "stats");
                     stats.put("encoder", String.valueOf(m.get("encoderImplementation")));
                     stats.put("limit", String.valueOf(m.get("qualityLimitationReason")));
                     if (m.get("framesPerSecond") != null) stats.put("fps", m.get("framesPerSecond"));
+                    if (m.get("totalEncodeTime") instanceof Number && m.get("framesEncoded") instanceof Number) {
+                        double seconds = ((Number) m.get("totalEncodeTime")).doubleValue();
+                        long frames = ((Number) m.get("framesEncoded")).longValue();
+                        if (frames > lastFramesEncoded) {
+                            stats.put("encode_ms", Math.round(1000 * (seconds - lastEncodeSeconds) / (frames - lastFramesEncoded)));
+                        }
+                        lastEncodeSeconds = seconds;
+                        lastFramesEncoded = frames;
+                    }
                     RTCStats codec = report.getStatsMap().get(String.valueOf(m.get("codecId")));
                     if (codec != null) stats.put("codec", String.valueOf(codec.getMembers().get("mimeType")));
                 }
             } catch (Exception ignored) {}
-            if (stats.length() > 0) thread.post(() -> send(stats));
+            if (stats.has("t")) thread.post(() -> send(stats));
         });
     }
 

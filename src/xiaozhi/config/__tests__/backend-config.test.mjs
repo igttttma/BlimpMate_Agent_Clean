@@ -32,14 +32,19 @@ assert.equal(resolveBackendConfig(storage), null, "no config means the UI must a
 
 globalThis.xiaozhiConfig = { otaUrl: "http://env-ota/xiaozhi/ota/", wsUrl: null };
 assert.deepEqual(resolveBackendConfig(storage), {
-  config: { mode: "ota", url: "http://env-ota/xiaozhi/ota/", token: "" }, source: "env"
+  config: { mode: "ota", url: "http://env-ota/xiaozhi/ota/" }, source: "env"
 });
-globalThis.xiaozhiConfig = { otaUrl: "http://env-ota/", wsUrl: "ws://env-ws/", wsToken: "t" };
-assert.equal(resolveBackendConfig(storage).config.mode, "ws", "env websocket beats env OTA");
+globalThis.xiaozhiConfig = { otaUrl: "http://env-ota/", wsUrl: "ws://env-ws/" };
+assert.deepEqual(resolveBackendConfig(storage).config, { mode: "ws", url: "ws://env-ws/" }, "env websocket beats env OTA");
 
-saveBackendConfig(storage, { mode: "ota", url: " http://saved/ota/ ", token: "ignored" });
+// A token saved by an older version is dropped
+saveBackendConfig(storage, { mode: "ws", url: " ws://saved/v1/ ", token: "old" });
 assert.deepEqual(resolveBackendConfig(storage), {
-  config: { mode: "ota", url: "http://saved/ota/", token: "" }, source: "saved"
+  config: { mode: "ws", url: "ws://saved/v1/" }, source: "saved"
+});
+saveBackendConfig(storage, { mode: "ota", url: " http://saved/ota/ " });
+assert.deepEqual(resolveBackendConfig(storage), {
+  config: { mode: "ota", url: "http://saved/ota/" }, source: "saved"
 });
 storage.set(STORAGE_KEYS.BACKEND, "{not json");
 assert.equal(resolveBackendConfig(storage).source, "env", "corrupt saved config falls back");
@@ -60,8 +65,8 @@ const otaUrl = `http://127.0.0.1:${server.address().port}/xiaozhi/ota/`;
 const s2 = memoryStorage();
 
 try {
-  const direct = await ensureActivated(s2, { mode: "ws", url: "ws://direct/", token: "tok" });
-  assert.deepEqual([direct.wsUrl, direct.wsToken], ["ws://direct/", "tok"]);
+  const direct = await ensureActivated(s2, { mode: "ws", url: "ws://direct/" });
+  assert.deepEqual([direct.wsUrl, direct.wsToken], ["ws://direct/", ""]);
 
   otaReplies = [{ status: 200, body: { websocket: { url: "ws://from-ota/", token: "" } } }];
   const viaOta = await ensureActivated(s2, { mode: "ota", url: otaUrl });

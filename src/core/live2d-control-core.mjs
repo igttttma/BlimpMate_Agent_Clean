@@ -22,6 +22,7 @@ export class Live2DControlCore {
   constructor(settings = {}, rng = Math.random) {
     this.settings = {
       updateInterval: 0.05,
+      enableAutoBlink: true,
       blinkMinInterval: 5,
       blinkMaxInterval: 10,
       blinkDuration: 0.1,
@@ -414,7 +415,7 @@ export class Live2DControlCore {
         const progress = this._blinkTimer / (this.settings.blinkDuration * 0.5);
         this._setEyeOpenness(clamp(1 - progress, 0, 1));
       }
-    } else if (this._blinkTimer >= this._nextBlinkTime) {
+    } else if (this._blinkTimer >= this._nextBlinkTime && this.settings.enableAutoBlink) {
       this._isBlinking = true;
       this._blinkTimer = 0;
     }

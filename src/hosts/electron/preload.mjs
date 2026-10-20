@@ -138,17 +138,15 @@ const wakeWord = {
 // silently degrade to mock. Set it so they reach the real Flask port.
 bridge.hostServiceUrl = hostServiceUrl;
 
-// Xiaozhi backend from .env (env -> renderer): a websocket endpoint + token
-// (BM_XIAOZHI_WS_URL / BM_XIAOZHI_WS_TOKEN) or an OTA endpoint
-// (BM_XIAOZHI_OTA_URL). A backend saved from the UI wins over these; with
-// neither, the renderer asks the operator on first launch.
+// Xiaozhi backend from .env (env -> renderer): a websocket endpoint
+// (BM_XIAOZHI_WS_URL) or an OTA endpoint (BM_XIAOZHI_OTA_URL). A backend saved
+// from the UI wins over these; with neither, the renderer asks the operator on
+// first launch.
 const xiaozhiConfig = {
   otaUrl: (process.env.BM_XIAOZHI_OTA_URL || "").trim() || null,
   wsUrl: (process.env.BM_XIAOZHI_WS_URL || "").trim() || null,
-  wsToken: (process.env.BM_XIAOZHI_WS_TOKEN || "").trim() || null,
   // Video-call server (separate from xiaozhi); a config saved in the UI wins
-  videoChatUrl: (process.env.BM_VIDEO_CHAT_URL || "").trim() || null,
-  videoChatToken: (process.env.BM_VIDEO_CHAT_TOKEN || "").trim() || null
+  videoChatUrl: (process.env.BM_VIDEO_CHAT_URL || "").trim() || null
 };
 
 contextBridge.exposeInMainWorld("hostBridge", bridge);

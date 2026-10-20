@@ -72,7 +72,7 @@ export class CallController extends EventTarget {
     };
   }
 
-  /** Connect to the stream server ({ url, token }); an empty url turns calls off. */
+  /** Connect to the stream server ({ url }); an empty url turns calls off. */
   configure(cfg) {
     if (this.client) {
       this.client.close();

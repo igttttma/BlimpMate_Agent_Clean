@@ -111,7 +111,7 @@ export async function ensureActivated(storage, backend, onActivationRequired) {
   if (!backend || !backend.url) throw new Error("No backend configured");
 
   if (backend.mode === BackendMode.WS) {
-    return { wsUrl: backend.url, wsToken: backend.token || "", alreadyActivated: true };
+    return { wsUrl: backend.url, wsToken: "", alreadyActivated: true };
   }
 
   const otaUrl = backend.url;

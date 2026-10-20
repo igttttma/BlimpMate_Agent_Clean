@@ -233,6 +233,8 @@ export class Conversation extends EventTarget {
   async disconnect() {
     if (this.protocol) await this.protocol.close();
     this.protocol = null;
+    this._connectionState.isConnected = false;
+    this._connectionState.connectInFlight = false;
     this._connectionState.lastDisconnectedAt = this._markNow("lastDisconnectedAt");
     this._connectionState.lastDisconnectReason = "user";
     this.state.setConnected(false, "user");

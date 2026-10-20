@@ -661,10 +661,6 @@ const chatPanel = createChatPanel({
     if (!window.__xz) return;
     await window.__xz.conversation.abort(AbortReason.USER_INTERRUPTION);
   },
-  onEndSession: async () => {
-    if (!window.__xz) return;
-    await window.__xz.conversation.endSession();
-  },
   onSendText: async (text) => {
     if (!window.__xz) return;
     await window.__xz.conversation.sendText(text);
@@ -929,7 +925,7 @@ if (window.hostBridge && window.hostBridge.storage) {
       return;
     }
 
-    window.__xz = { conversation: agent.conversation, identity: agent.identity, mode: "manual" };
+    window.__xz = { conversation: agent.conversation, identity: agent.identity, mode: "auto" };
     chatPanel.setDeviceId(agent.identity.mac);
 
     // --- Always-on wake word -------------------------------------------
@@ -1062,6 +1058,7 @@ if (window.hostBridge && window.hostBridge.storage) {
       identity: agent.identity,
       callController,
       getWakeCoordinator: () => window.__xz.wakeCoordinator || null,
+      avatar: window.hostBridge,
       log: (level, message, detail = {}) => chatPanel.addLog({
         ts: new Date().toISOString(), level, message, detail: { source: "remote-control", ...detail }
       })

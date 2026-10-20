@@ -22,6 +22,13 @@ let _app = null;
 let _model = null;
 
 export async function initLive2D(container, getParams, onTick) {
+  // Create the WebGL context only once the page has loaded. On a cold start of
+  // the Android app (seen on the emulator), a context created while the page is
+  // still loading gets a canvas buffer that never shows what is drawn; the
+  // face stayed invisible until something resized the canvas.
+  if (document.readyState !== "complete") {
+    await new Promise((resolve) => addEventListener("load", resolve, { once: true }));
+  }
   _app = new PIXI.Application({
     width: container.clientWidth || 800,
     height: container.clientHeight || 600,

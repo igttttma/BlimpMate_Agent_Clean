@@ -58,16 +58,20 @@ export class WakeCoordinator extends EventTarget {
     this.activationQueue = Promise.resolve();
   }
 
+  /** Start a conversation as if the wake word was heard (also used by the portal). */
+  activate(event = {}) {
+    this.activationQueue = this.activationQueue
+      .catch(() => {})
+      .then(() => this.conversation.activateFromWake(event, {
+        beforeListen: this.beforeListen
+      }));
+    return this.activationQueue;
+  }
+
   async start() {
     if (this.running) return this.provider.getStatus?.() || { running: true };
     if (!this.unsubscribe) {
-      this.unsubscribe = this.provider.onWake((event) => {
-        this.activationQueue = this.activationQueue
-          .catch(() => {})
-          .then(() => this.conversation.activateFromWake(event, {
-            beforeListen: this.beforeListen
-          }));
-      });
+      this.unsubscribe = this.provider.onWake((event) => this.activate(event));
     }
     const status = await this.provider.start();
     this.running = status?.running !== false;

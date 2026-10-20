@@ -5,14 +5,14 @@ import { STORAGE_KEYS } from "./app-config.mjs";
 // with neither the UI asks the operator on first launch.
 //   ota: POST the OTA endpoint; it returns the websocket URL/token and may
 //        require device activation (binding) first.
-//   ws:  connect straight to a known websocket URL (optional token).
+//   ws:  connect straight to a known websocket URL. No token: the server
+//        doesn't check one with auth off; with auth on, use OTA mode.
 export const BackendMode = Object.freeze({ OTA: "ota", WS: "ws" });
 
 export function normalizeBackendConfig(cfg) {
   const mode = cfg?.mode === BackendMode.WS ? BackendMode.WS : BackendMode.OTA;
   const url = typeof cfg?.url === "string" ? cfg.url.trim() : "";
-  const token = mode === BackendMode.WS && typeof cfg?.token === "string" ? cfg.token.trim() : "";
-  return { mode, url, token };
+  return { mode, url };
 }
 
 // Returns an error message, or null when the config is usable.
@@ -63,7 +63,7 @@ export function envBackendConfig() {
   const wsUrl = typeof env?.wsUrl === "string" ? env.wsUrl.trim() : "";
   const otaUrl = typeof env?.otaUrl === "string" ? env.otaUrl.trim() : "";
   const cfg = wsUrl
-    ? { mode: BackendMode.WS, url: wsUrl, token: env?.wsToken || "" }
+    ? { mode: BackendMode.WS, url: wsUrl }
     : otaUrl ? { mode: BackendMode.OTA, url: otaUrl } : null;
   return cfg && !validateBackendConfig(cfg) ? normalizeBackendConfig(cfg) : null;
 }

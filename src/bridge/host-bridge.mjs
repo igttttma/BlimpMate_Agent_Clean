@@ -67,6 +67,10 @@ export function createLocalHostBridge(core, options = {}) {
     setAutoRecoverExpression(enable) {
       core.settings.autoRecoverExpression = enable;
     },
+    /** Random blinking on/off; triggerBlink() still blinks once either way. */
+    setAutoBlink(enable) {
+      core.settings.enableAutoBlink = enable;
+    },
     setBlinkSettings(minInterval, maxInterval, duration) {
       core.setBlinkSettings(minInterval, maxInterval, duration);
     },
@@ -82,6 +86,8 @@ export function createLocalHostBridge(core, options = {}) {
     getSettings() {
       return {
         blinkDuration: core.settings.blinkDuration,
+        autoBlink: core.settings.enableAutoBlink,
+        autoRecoverExpression: core.settings.autoRecoverExpression,
         eyeMovementInterval: core.settings.eyeMovementInterval,
         eyeReturnDelay: core.settings.eyeReturnDelay
       };

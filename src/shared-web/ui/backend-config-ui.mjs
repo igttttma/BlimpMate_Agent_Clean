@@ -10,8 +10,8 @@ const PLACEHOLDERS = {
   [BackendMode.WS]: "ws://127.0.0.1:8000/xiaozhi/v1/"
 };
 
-// Mode selector + URL + (websocket-only) token. Shared by the first-run
-// dialog and the chat panel so both validate and save the same shape.
+// Mode selector + URL. Shared by the first-run dialog and the chat panel so
+// both validate and save the same shape.
 export function createBackendForm() {
   const el = document.createElement("div");
   el.className = "xz-backend-form";
@@ -22,13 +22,10 @@ export function createBackendForm() {
     </div>
     <div class="xz-backend-hint"></div>
     <input type="text" class="xz-input" data-field="url" spellcheck="false" autocomplete="off" />
-    <input type="text" class="xz-input" data-field="token" spellcheck="false" autocomplete="off"
-           placeholder="Token (optional)" />
     <div class="xz-backend-error" role="alert"></div>
   `;
   const modeButtons = [...el.querySelectorAll("[data-mode]")];
   const urlInput = el.querySelector('[data-field="url"]');
-  const tokenInput = el.querySelector('[data-field="token"]');
   const hintEl = el.querySelector(".xz-backend-hint");
   const errorEl = el.querySelector(".xz-backend-error");
   let mode = BackendMode.OTA;
@@ -42,7 +39,6 @@ export function createBackendForm() {
       b.setAttribute("aria-checked", String(on));
     });
     urlInput.placeholder = PLACEHOLDERS[mode];
-    tokenInput.hidden = mode !== BackendMode.WS;
     hintEl.textContent = mode === BackendMode.OTA
       ? "The server's OTA endpoint provides the websocket address, and may ask to bind this device."
       : "Connect straight to a known websocket address.";
@@ -59,9 +55,9 @@ export function createBackendForm() {
     if (guessed && guessed !== mode) setMode(guessed);
     showError("");
   });
-  [urlInput, tokenInput].forEach((input) => input.addEventListener("keydown", (ev) => {
+  urlInput.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" && onSubmit) onSubmit();
-  }));
+  });
 
   setMode(BackendMode.OTA);
   showError("");
@@ -69,13 +65,12 @@ export function createBackendForm() {
   return {
     el,
     getValue() {
-      return normalizeBackendConfig({ mode, url: urlInput.value, token: tokenInput.value });
+      return normalizeBackendConfig({ mode, url: urlInput.value });
     },
     setValue(cfg) {
       const c = normalizeBackendConfig(cfg || {});
       setMode(cfg ? c.mode : BackendMode.OTA);
       urlInput.value = c.url;
-      tokenInput.value = c.token;
       showError("");
     },
     // Returns the config when valid; otherwise shows why and returns null.
@@ -114,7 +109,7 @@ export function createBackendSetupDialog() {
   const saveBtn = overlay.querySelector('[data-action="save"]');
 
   return {
-    // Resolves with a validated { mode, url, token } once the operator saves.
+    // Resolves with a validated { mode, url } once the operator saves.
     ask({ initial = null, message = "", error = "" } = {}) {
       msgEl.textContent = message || "No backend is configured yet. Choose how this client reaches the xiaozhi server.";
       form.setValue(initial);

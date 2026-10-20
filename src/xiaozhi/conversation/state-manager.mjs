@@ -4,7 +4,7 @@ export class StateManager extends EventTarget {
   constructor() {
     super();
     this._device = DeviceState.IDLE;
-    this._mode = ListeningMode.MANUAL;
+    this._mode = ListeningMode.AUTO_STOP;
     this._aborted = false;
     this._connected = false;
   }

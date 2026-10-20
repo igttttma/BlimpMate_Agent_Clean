@@ -2,7 +2,7 @@ import { createBackendForm } from "./backend-config-ui.mjs";
 
 // Chat panel UI: toggle button + collapsible panel with connect, backend,
 // mode, big PTT button, abort, subtitle area, settings.
-export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onEndSession, onSendText, onModeChange }) {
+export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onSendText, onModeChange }) {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "xz-panel-toggle";
@@ -48,8 +48,6 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
         <div class="xz-section-label">Video calls<span class="xz-backend-source" id="xzCallStatus"></span></div>
         <input type="text" class="xz-input" id="xzCallUrl" spellcheck="false" autocomplete="off"
                placeholder="wss://203.0.113.7:8443/ws (empty = off)" />
-        <input type="text" class="xz-input" id="xzCallToken" spellcheck="false" autocomplete="off"
-               placeholder="Blimp token" />
         <div class="xz-backend-error" id="xzCallError" role="alert" hidden></div>
         <div class="xz-row" style="margin-top: 8px;">
           <button type="button" class="xz-btn" id="xzCallApply">Apply</button>
@@ -59,13 +57,13 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
       <div class="xz-section">
         <div class="xz-section-label">Mode</div>
         <div class="xz-row">
-          <button type="button" class="xz-btn xz-active" id="xzModeManual">Manual</button>
-          <button type="button" class="xz-btn" id="xzModeAuto">Auto</button>
+          <button type="button" class="xz-btn" id="xzModeManual">Manual</button>
+          <button type="button" class="xz-btn xz-active" id="xzModeAuto">Auto</button>
         </div>
       </div>
 
       <div class="xz-section">
-        <button type="button" class="xz-talk" id="xzTalk">Hold to talk</button>
+        <button type="button" class="xz-talk" id="xzTalk">Start conversation</button>
         <button type="button" class="xz-btn" id="xzAbort">Stop</button>
       </div>
 
@@ -170,7 +168,7 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
   const systemAlertsEl = $("xzSystemAlerts");
   const logEl = $("xzSessionLog");
 
-  let mode = "manual";
+  let mode = "auto";
   let pressing = false;
   let autoActive = false;
   const logs = [];
@@ -190,18 +188,12 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
   backendResetBtn.addEventListener("click", () => onBackendReset && onBackendReset());
   const callErrorEl = $("xzCallError");
   $("xzCallApply").addEventListener("click", () => {
-    const error = onCallApply ? onCallApply({ url: $("xzCallUrl").value, token: $("xzCallToken").value }) : null;
+    const error = onCallApply ? onCallApply({ url: $("xzCallUrl").value }) : null;
     callErrorEl.textContent = error || "";
     callErrorEl.hidden = !error;
   });
   $("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
   $("xzAbort").addEventListener("click", () => onAbort && onAbort());
-  const endSessionBtn = document.createElement("button");
-  endSessionBtn.type = "button";
-  endSessionBtn.className = "xz-btn xz-btn-danger";
-  endSessionBtn.textContent = "End session";
-  $("xzAbort").insertAdjacentElement("afterend", endSessionBtn);
-  endSessionBtn.addEventListener("click", () => onEndSession && onEndSession());
 
   const applyMode = (nextMode, active = false) => {
     mode = nextMode === "auto" ? "auto" : "manual";
@@ -301,7 +293,6 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
     showBackendError(msg) { backendForm.showError(msg); },
     setCallConfig(cfg) {
       $("xzCallUrl").value = cfg?.url || "";
-      $("xzCallToken").value = cfg?.token || "";
     },
     setCallStatus(s) {
       const text = !s || s.state === "off" ? (s?.connected === false ? "(not connected)" : "(off)")
@@ -531,7 +522,7 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
       const services = summary.services || {};
       const hostAudio = summary.hostAudio || {};
       const counts = summary.counts || {};
-      const mode = typeof session.mode === "string" && session.mode.trim() ? session.mode : "manual";
+      const mode = typeof session.mode === "string" && session.mode.trim() ? session.mode : "auto";
       const protocolText = !!session.protocolConnected ? "RPC up" : "Offline";
       const sessionConnected = !!session.connected;
       systemSessionEl.textContent = `${sessionConnected ? "Up" : "Down"} / ${mode} / ${protocolText}`;

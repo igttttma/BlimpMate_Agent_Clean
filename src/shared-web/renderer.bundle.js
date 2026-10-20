@@ -32028,6 +32028,9 @@ void main(void)\r
   var _app = null;
   var _model = null;
   async function initLive2D(container, getParams, onTick) {
+    if (document.readyState !== "complete") {
+      await new Promise((resolve2) => addEventListener("load", resolve2, { once: true }));
+    }
     _app = new Application({
       width: container.clientWidth || 800,
       height: container.clientHeight || 600,
@@ -32359,6 +32362,7 @@ void main(void)\r
     constructor(settings2 = {}, rng = Math.random) {
       this.settings = {
         updateInterval: 0.05,
+        enableAutoBlink: true,
         blinkMinInterval: 5,
         blinkMaxInterval: 10,
         blinkDuration: 0.1,
@@ -32702,7 +32706,7 @@ void main(void)\r
           const progress = this._blinkTimer / (this.settings.blinkDuration * 0.5);
           this._setEyeOpenness(clamp2(1 - progress, 0, 1));
         }
-      } else if (this._blinkTimer >= this._nextBlinkTime) {
+      } else if (this._blinkTimer >= this._nextBlinkTime && this.settings.enableAutoBlink) {
         this._isBlinking = true;
         this._blinkTimer = 0;
       }
@@ -32870,6 +32874,10 @@ void main(void)\r
       setAutoRecoverExpression(enable) {
         core.settings.autoRecoverExpression = enable;
       },
+      /** Random blinking on/off; triggerBlink() still blinks once either way. */
+      setAutoBlink(enable) {
+        core.settings.enableAutoBlink = enable;
+      },
       setBlinkSettings(minInterval, maxInterval, duration) {
         core.setBlinkSettings(minInterval, maxInterval, duration);
       },
@@ -32885,6 +32893,8 @@ void main(void)\r
       getSettings() {
         return {
           blinkDuration: core.settings.blinkDuration,
+          autoBlink: core.settings.enableAutoBlink,
+          autoRecoverExpression: core.settings.autoRecoverExpression,
           eyeMovementInterval: core.settings.eyeMovementInterval,
           eyeReturnDelay: core.settings.eyeReturnDelay
         };
@@ -33028,8 +33038,7 @@ void main(void)\r
   function normalizeBackendConfig(cfg) {
     const mode = cfg?.mode === BackendMode.WS ? BackendMode.WS : BackendMode.OTA;
     const url2 = typeof cfg?.url === "string" ? cfg.url.trim() : "";
-    const token = mode === BackendMode.WS && typeof cfg?.token === "string" ? cfg.token.trim() : "";
-    return { mode, url: url2, token };
+    return { mode, url: url2 };
   }
   function validateBackendConfig(cfg) {
     const { mode, url: url2 } = normalizeBackendConfig(cfg);
@@ -33069,7 +33078,7 @@ void main(void)\r
     const env = globalThis?.xiaozhiConfig;
     const wsUrl = typeof env?.wsUrl === "string" ? env.wsUrl.trim() : "";
     const otaUrl = typeof env?.otaUrl === "string" ? env.otaUrl.trim() : "";
-    const cfg = wsUrl ? { mode: BackendMode.WS, url: wsUrl, token: env?.wsToken || "" } : otaUrl ? { mode: BackendMode.OTA, url: otaUrl } : null;
+    const cfg = wsUrl ? { mode: BackendMode.WS, url: wsUrl } : otaUrl ? { mode: BackendMode.OTA, url: otaUrl } : null;
     return cfg && !validateBackendConfig(cfg) ? normalizeBackendConfig(cfg) : null;
   }
   function resolveBackendConfig(storage) {
@@ -33176,7 +33185,7 @@ void main(void)\r
   async function ensureActivated(storage, backend, onActivationRequired) {
     if (!backend || !backend.url) throw new Error("No backend configured");
     if (backend.mode === BackendMode.WS) {
-      return { wsUrl: backend.url, wsToken: backend.token || "", alreadyActivated: true };
+      return { wsUrl: backend.url, wsToken: "", alreadyActivated: true };
     }
     const otaUrl = backend.url;
     let response;
@@ -33534,7 +33543,7 @@ void main(void)\r
     constructor() {
       super();
       this._device = DeviceState.IDLE;
-      this._mode = ListeningMode.MANUAL;
+      this._mode = ListeningMode.AUTO_STOP;
       this._aborted = false;
       this._connected = false;
     }
@@ -34665,6 +34674,8 @@ void main(void)\r
     async disconnect() {
       if (this.protocol) await this.protocol.close();
       this.protocol = null;
+      this._connectionState.isConnected = false;
+      this._connectionState.connectInFlight = false;
       this._connectionState.lastDisconnectedAt = this._markNow("lastDisconnectedAt");
       this._connectionState.lastDisconnectReason = "user";
       this.state.setConnected(false, "user");
@@ -35010,13 +35021,10 @@ void main(void)\r
     </div>
     <div class="xz-backend-hint"></div>
     <input type="text" class="xz-input" data-field="url" spellcheck="false" autocomplete="off" />
-    <input type="text" class="xz-input" data-field="token" spellcheck="false" autocomplete="off"
-           placeholder="Token (optional)" />
     <div class="xz-backend-error" role="alert"></div>
   `;
     const modeButtons = [...el.querySelectorAll("[data-mode]")];
     const urlInput = el.querySelector('[data-field="url"]');
-    const tokenInput = el.querySelector('[data-field="token"]');
     const hintEl = el.querySelector(".xz-backend-hint");
     const errorEl = el.querySelector(".xz-backend-error");
     let mode = BackendMode.OTA;
@@ -35029,7 +35037,6 @@ void main(void)\r
         b2.setAttribute("aria-checked", String(on));
       });
       urlInput.placeholder = PLACEHOLDERS[mode];
-      tokenInput.hidden = mode !== BackendMode.WS;
       hintEl.textContent = mode === BackendMode.OTA ? "The server's OTA endpoint provides the websocket address, and may ask to bind this device." : "Connect straight to a known websocket address.";
     };
     const showError = (msg) => {
@@ -35045,21 +35052,20 @@ void main(void)\r
       if (guessed && guessed !== mode) setMode(guessed);
       showError("");
     });
-    [urlInput, tokenInput].forEach((input) => input.addEventListener("keydown", (ev) => {
+    urlInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" && onSubmit) onSubmit();
-    }));
+    });
     setMode(BackendMode.OTA);
     showError("");
     return {
       el,
       getValue() {
-        return normalizeBackendConfig({ mode, url: urlInput.value, token: tokenInput.value });
+        return normalizeBackendConfig({ mode, url: urlInput.value });
       },
       setValue(cfg) {
         const c2 = normalizeBackendConfig(cfg || {});
         setMode(cfg ? c2.mode : BackendMode.OTA);
         urlInput.value = c2.url;
-        tokenInput.value = c2.token;
         showError("");
       },
       // Returns the config when valid; otherwise shows why and returns null.
@@ -35099,7 +35105,7 @@ void main(void)\r
     overlay.querySelector(".xz-backend-slot").appendChild(form.el);
     const saveBtn = overlay.querySelector('[data-action="save"]');
     return {
-      // Resolves with a validated { mode, url, token } once the operator saves.
+      // Resolves with a validated { mode, url } once the operator saves.
       ask({ initial = null, message = "", error = "" } = {}) {
         msgEl.textContent = message || "No backend is configured yet. Choose how this client reaches the xiaozhi server.";
         form.setValue(initial);
@@ -35123,7 +35129,7 @@ void main(void)\r
   }
 
   // src/shared-web/ui/chat-panel.mjs
-  function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onEndSession, onSendText, onModeChange }) {
+  function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onSendText, onModeChange }) {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "xz-panel-toggle";
@@ -35167,8 +35173,6 @@ void main(void)\r
         <div class="xz-section-label">Video calls<span class="xz-backend-source" id="xzCallStatus"></span></div>
         <input type="text" class="xz-input" id="xzCallUrl" spellcheck="false" autocomplete="off"
                placeholder="wss://203.0.113.7:8443/ws (empty = off)" />
-        <input type="text" class="xz-input" id="xzCallToken" spellcheck="false" autocomplete="off"
-               placeholder="Blimp token" />
         <div class="xz-backend-error" id="xzCallError" role="alert" hidden></div>
         <div class="xz-row" style="margin-top: 8px;">
           <button type="button" class="xz-btn" id="xzCallApply">Apply</button>
@@ -35178,13 +35182,13 @@ void main(void)\r
       <div class="xz-section">
         <div class="xz-section-label">Mode</div>
         <div class="xz-row">
-          <button type="button" class="xz-btn xz-active" id="xzModeManual">Manual</button>
-          <button type="button" class="xz-btn" id="xzModeAuto">Auto</button>
+          <button type="button" class="xz-btn" id="xzModeManual">Manual</button>
+          <button type="button" class="xz-btn xz-active" id="xzModeAuto">Auto</button>
         </div>
       </div>
 
       <div class="xz-section">
-        <button type="button" class="xz-talk" id="xzTalk">Hold to talk</button>
+        <button type="button" class="xz-talk" id="xzTalk">Start conversation</button>
         <button type="button" class="xz-btn" id="xzAbort">Stop</button>
       </div>
 
@@ -35287,7 +35291,7 @@ void main(void)\r
     const systemRiskEl = $2("xzSystemRisk");
     const systemAlertsEl = $2("xzSystemAlerts");
     const logEl = $2("xzSessionLog");
-    let mode = "manual";
+    let mode = "auto";
     let pressing = false;
     let autoActive = false;
     const logs = [];
@@ -35312,18 +35316,12 @@ void main(void)\r
     backendResetBtn.addEventListener("click", () => onBackendReset && onBackendReset());
     const callErrorEl = $2("xzCallError");
     $2("xzCallApply").addEventListener("click", () => {
-      const error = onCallApply ? onCallApply({ url: $2("xzCallUrl").value, token: $2("xzCallToken").value }) : null;
+      const error = onCallApply ? onCallApply({ url: $2("xzCallUrl").value }) : null;
       callErrorEl.textContent = error || "";
       callErrorEl.hidden = !error;
     });
     $2("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
     $2("xzAbort").addEventListener("click", () => onAbort && onAbort());
-    const endSessionBtn = document.createElement("button");
-    endSessionBtn.type = "button";
-    endSessionBtn.className = "xz-btn xz-btn-danger";
-    endSessionBtn.textContent = "End session";
-    $2("xzAbort").insertAdjacentElement("afterend", endSessionBtn);
-    endSessionBtn.addEventListener("click", () => onEndSession && onEndSession());
     const applyMode = (nextMode, active = false) => {
       mode = nextMode === "auto" ? "auto" : "manual";
       autoActive = mode === "auto" && !!active;
@@ -35428,7 +35426,6 @@ void main(void)\r
       },
       setCallConfig(cfg) {
         $2("xzCallUrl").value = cfg?.url || "";
-        $2("xzCallToken").value = cfg?.token || "";
       },
       setCallStatus(s2) {
         const text = !s2 || s2.state === "off" ? s2?.connected === false ? "(not connected)" : "(off)" : s2.state === "idle" ? `(remote ${s2.remote})` : `(${s2.state.replace("_", " ")})`;
@@ -35638,7 +35635,7 @@ void main(void)\r
         const services = summary.services || {};
         const hostAudio = summary.hostAudio || {};
         const counts = summary.counts || {};
-        const mode2 = typeof session.mode === "string" && session.mode.trim() ? session.mode : "manual";
+        const mode2 = typeof session.mode === "string" && session.mode.trim() ? session.mode : "auto";
         const protocolText = !!session.protocolConnected ? "RPC up" : "Offline";
         const sessionConnected = !!session.connected;
         systemSessionEl.textContent = `${sessionConnected ? "Up" : "Down"} / ${mode2} / ${protocolText}`;
@@ -36005,15 +36002,18 @@ void main(void)\r
       this.unsubscribe = null;
       this.activationQueue = Promise.resolve();
     }
+    /** Start a conversation as if the wake word was heard (also used by the portal). */
+    activate(event = {}) {
+      this.activationQueue = this.activationQueue.catch(() => {
+      }).then(() => this.conversation.activateFromWake(event, {
+        beforeListen: this.beforeListen
+      }));
+      return this.activationQueue;
+    }
     async start() {
       if (this.running) return this.provider.getStatus?.() || { running: true };
       if (!this.unsubscribe) {
-        this.unsubscribe = this.provider.onWake((event) => {
-          this.activationQueue = this.activationQueue.catch(() => {
-          }).then(() => this.conversation.activateFromWake(event, {
-            beforeListen: this.beforeListen
-          }));
-        });
+        this.unsubscribe = this.provider.onWake((event) => this.activate(event));
       }
       const status = await this.provider.start();
       this.running = status?.running !== false;
@@ -36481,6 +36481,7 @@ void main(void)\r
 
   // src/videochat/call-config.mjs
   var STORAGE_KEY = "blimpmate.videochat_v1";
+  var BLIMP_PASSWORD = "blimpmate";
   function normalizeCallConfig(cfg) {
     let url2 = typeof cfg?.url === "string" ? cfg.url.trim() : "";
     if (/^https?:\/\//i.test(url2)) {
@@ -36489,8 +36490,7 @@ void main(void)\r
       if (u2.pathname === "/" || u2.pathname === "") u2.pathname = "/ws";
       url2 = u2.toString();
     }
-    const token = typeof cfg?.token === "string" ? cfg.token.trim() : "";
-    return { url: url2, token };
+    return { url: url2 };
   }
   function validateCallConfig(cfg) {
     const { url: url2 } = normalizeCallConfig(cfg);
@@ -36507,17 +36507,17 @@ void main(void)\r
       }
     }
     const env = globalThis?.xiaozhiConfig;
-    return normalizeCallConfig({ url: env?.videoChatUrl || "", token: env?.videoChatToken || "" });
+    return normalizeCallConfig({ url: env?.videoChatUrl || "" });
   }
   function saveCallConfig(storage, cfg) {
     const normalized = normalizeCallConfig(cfg);
     storage.set(STORAGE_KEY, JSON.stringify(normalized));
     return normalized;
   }
-  function signalingUrl({ url: url2, token }) {
+  function signalingUrl({ url: url2 }) {
     const u2 = new URL(url2);
     u2.searchParams.set("role", "blimp");
-    if (token) u2.searchParams.set("token", token);
+    u2.searchParams.set("token", BLIMP_PASSWORD);
     return u2.toString();
   }
 
@@ -36580,7 +36580,7 @@ void main(void)\r
         remote: this.client?.connected ? this.client.presence.remote : "unknown"
       };
     }
-    /** Connect to the stream server ({ url, token }); an empty url turns calls off. */
+    /** Connect to the stream server ({ url }); an empty url turns calls off. */
     configure(cfg) {
       if (this.client) {
         this.client.close();
@@ -37518,11 +37518,21 @@ void main(void)\r
     if (httpPort) url2.port = String(httpPort);
     return url2.origin;
   }
-  function startRemoteControl({ conversation, identity, callController, getWakeCoordinator, log = () => {
+  function startRemoteControl({ conversation, identity, callController, getWakeCoordinator, avatar, log = () => {
   } }) {
     const channel = new ControlChannel({ wsUrl: conversation.wsUrl, token: conversation.wsToken, identity });
     const playback = new MediaPlayback({ conversation, getWakeCoordinator, callController, log });
     const videos = new VideoCache({ log });
+    const expressions = avatar.getExpressionTypes();
+    const avatarState = () => {
+      const settings2 = avatar.getSettings();
+      return {
+        expression: avatar.getSnapshot().targetExpression,
+        auto_blink: settings2.autoBlink,
+        auto_recover: settings2.autoRecoverExpression,
+        expressions
+      };
+    };
     const snapshot = () => {
       const device = conversation.state.device;
       const inConversation = conversation._autoSessionActive || device !== DeviceState.IDLE;
@@ -37531,11 +37541,15 @@ void main(void)\r
         type: "state",
         activity: callController?.busy ? call : playback.active ? "playing" : inConversation ? "conversation" : "idle",
         conversation: inConversation && device === DeviceState.IDLE ? "connecting" : device,
+        connected: conversation.state.connected,
         call,
         wake: !!getWakeCoordinator()?.running,
         playback: playback.playback,
         loop: playback.loop,
-        videos: videos.status()
+        videos: videos.status(),
+        avatar: avatarState(),
+        // Lists this Blimp in the portal (several can share one server)
+        client: { user_agent: navigator.userAgent, platform: globalThis.hostInfo?.platform || "" }
       };
     };
     let pending = false;
@@ -37589,13 +37603,54 @@ void main(void)\r
         if (!callController?.decline("portal")) log("info", "Portal decline ignored: no call is ringing");
       } else if (msg.type === "end_call") {
         if (!callController?.end("portal")) log("info", "Portal end call ignored: no call");
+      } else if (msg.type === "avatar") {
+        setAvatar(msg);
+      } else if (msg.type === "conversation") {
+        runConversation(msg).catch((err) => log("error", `Portal ${msg.action} failed`, { error: String(err) }));
       }
     });
+    function setAvatar(msg) {
+      if (msg.expression === "None") avatar.clearExpression();
+      else if (expressions.includes(msg.expression)) avatar.setExpression(msg.expression);
+      if (msg.blink === true) avatar.triggerBlink();
+      if (typeof msg.auto_blink === "boolean") avatar.setAutoBlink(msg.auto_blink);
+      if (typeof msg.auto_recover === "boolean") avatar.setAutoRecoverExpression(msg.auto_recover);
+      report();
+    }
+    async function runConversation({ action, text }) {
+      if (callController?.busy && action !== "disconnect" && action !== "interrupt") {
+        log("info", `Portal ${action} ignored: a video call has the microphone`);
+        return;
+      }
+      log("info", `Portal: ${action}`);
+      if (action === "connect") {
+        await conversation.connect();
+      } else if (action === "disconnect") {
+        await conversation.endSession();
+      } else if (action === "start") {
+        const event = { word: "Hey Blimp", source: "portal" };
+        const wake = getWakeCoordinator();
+        await (wake ? wake.activate(event) : conversation.activateFromWake(event));
+      } else if (action === "interrupt") {
+        await conversation.abort(AbortReason.USER_INTERRUPTION);
+      } else if (action === "send_text" && typeof text === "string") {
+        await conversation.sendText(text);
+      }
+    }
+    let lastExpression = avatarState().expression;
+    setInterval(() => {
+      const expression = avatar.getSnapshot().targetExpression;
+      if (expression !== lastExpression) {
+        lastExpression = expression;
+        report();
+      }
+    }, 500);
     playback.addEventListener("change", report);
     videos.addEventListener("change", report);
     conversation.state.addEventListener("device", report);
     conversation.addEventListener("wake", report);
     conversation.addEventListener("session-ended", report);
+    conversation.state.addEventListener("connected", report);
     callController?.addEventListener("status", report);
     getWakeCoordinator()?.addEventListener("status", report);
     channel.connect();
@@ -38184,10 +38239,6 @@ void main(void)\r
       if (!window.__xz) return;
       await window.__xz.conversation.abort(AbortReason.USER_INTERRUPTION);
     },
-    onEndSession: async () => {
-      if (!window.__xz) return;
-      await window.__xz.conversation.endSession();
-    },
     onSendText: async (text) => {
       if (!window.__xz) return;
       await window.__xz.conversation.sendText(text);
@@ -38425,7 +38476,7 @@ void main(void)\r
         location.reload();
         return;
       }
-      window.__xz = { conversation: agent.conversation, identity: agent.identity, mode: "manual" };
+      window.__xz = { conversation: agent.conversation, identity: agent.identity, mode: "auto" };
       chatPanel.setDeviceId(agent.identity.mac);
       try {
         const wakeHost = globalThis.hostInfo?.hostServiceUrl || `http://${globalThis.location?.hostname || "127.0.0.1"}:${globalThis.hostInfo?.hostServicePort || 5e3}`;
@@ -38549,6 +38600,7 @@ void main(void)\r
         identity: agent.identity,
         callController,
         getWakeCoordinator: () => window.__xz.wakeCoordinator || null,
+        avatar: window.hostBridge,
         log: (level, message, detail = {}) => chatPanel.addLog({
           ts: (/* @__PURE__ */ new Date()).toISOString(),
           level,

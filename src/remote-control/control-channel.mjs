@@ -6,7 +6,8 @@ import { APP_CONFIG } from "../xiaozhi/config/app-config.mjs";
 // answer_call, decline_call, end_call).
 //   4002  this device connected again elsewhere: don't reconnect (two copies
 //         of the app would keep replacing each other)
-//   4003  another Blimp owns the server: retry slowly, it may leave
+//   4003  another Blimp owns the server (older servers allowed only one):
+//         retry slowly, it may leave
 
 const CLOSE_REPLACED = 4002;
 const CLOSE_BLOCKED = 4003;

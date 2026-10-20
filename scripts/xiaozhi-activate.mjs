@@ -9,8 +9,8 @@
 //   node scripts/xiaozhi-activate.mjs http://127.0.0.1:8003/xiaozhi/ota/
 //
 // Identity is persisted to scripts/.xiaozhi-activation.json so re-runs reuse the
-// same device. The end result (BM_XIAOZHI_WS_URL / BM_XIAOZHI_WS_TOKEN) plugs
-// into the env-config fast-path so `npm run demo` connects with no GUI binding.
+// same device. The end result (BM_XIAOZHI_WS_URL) plugs into the env-config
+// fast-path so `npm run demo` connects with no GUI binding.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,10 +38,12 @@ const storage = {
 function printResult(wsUrl, wsToken) {
   console.log("\n" + "=".repeat(60));
   console.log("\x1b[32m✅ xiaozhi device activated.\x1b[0m\n");
-  console.log("Set these env vars (or put them in .env), then `npm run demo`:\n");
+  console.log("Set this env var (or put it in .env), then `npm run demo`:\n");
   console.log(`  export BM_XIAOZHI_WS_URL="${wsUrl}"`);
-  console.log(`  export BM_XIAOZHI_WS_TOKEN="${wsToken || ""}"`);
-  console.log("\n(The app uses them as a direct-WebSocket backend, with no binding round-trip.)");
+  console.log("\n(The app uses it as a direct-WebSocket backend, with no binding round-trip.)");
+  if (wsToken) {
+    console.log("\x1b[33mThe server requires a token (auth is on): use the OTA URL as the backend instead.\x1b[0m");
+  }
   console.log("=".repeat(60) + "\n");
 }
 

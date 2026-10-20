@@ -3,7 +3,8 @@ const { spawn } = require("node:child_process");
 const { app, BrowserWindow, protocol, net, session, ipcMain, safeStorage } = require("electron");
 const fs = require("node:fs");
 const http = require("node:http");
-const { randomUUID } = require("node:crypto");
+const { randomUUID, X509Certificate } = require("node:crypto");
+const { isIP } = require("node:net");
 const WebSocketLib = require("ws");
 
 protocol.registerSchemesAsPrivileged([
@@ -2185,12 +2186,37 @@ function createWindow() {
   });
 }
 
-// The video-call server may use a self-signed certificate. Trust it only when
-// its fingerprint matches BM_VIDEO_CHAT_CERT_FINGERPRINT ("sha256/…", printed by
-// the server's `npm run cert`).
-app.on("certificate-error", (event, _webContents, _url, _error, certificate, callback) => {
+// The stream server's certificate is signed by our own CA (the server's
+// `npm run cert`; src/certs/stream-server-ca.pem). Trust a certificate only when
+// that CA signed it, it is in date, and it names the host being contacted. The
+// chain the server sends is not trusted by itself: the signature is checked.
+// BM_VIDEO_CHAT_CERT_FINGERPRINT ("sha256/…") still pins one exact certificate.
+const STREAM_CA_FILE = path.join(PROJECT_ROOT, "src", "certs", "stream-server-ca.pem");
+let streamServerCa;
+function signedByStreamCa(certificate, url) {
+  if (streamServerCa === undefined) {
+    try {
+      streamServerCa = new X509Certificate(fs.readFileSync(STREAM_CA_FILE));
+    } catch {
+      streamServerCa = null;
+    }
+  }
+  if (!streamServerCa || !certificate?.data) return false;
+  try {
+    const cert = new X509Certificate(certificate.data);
+    const now = Date.now();
+    if (now < Date.parse(cert.validFrom) || now > Date.parse(cert.validTo)) return false;
+    if (!cert.checkIssued(streamServerCa) || !cert.verify(streamServerCa.publicKey)) return false;
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return isIP(host) ? cert.checkIP(host) !== undefined : cert.checkHost(host) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+app.on("certificate-error", (event, _webContents, url, _error, certificate, callback) => {
   const pinned = (process.env.BM_VIDEO_CHAT_CERT_FINGERPRINT || "").trim();
-  if (pinned && certificate?.fingerprint === pinned) {
+  if ((pinned && certificate?.fingerprint === pinned) || signedByStreamCa(certificate, url)) {
     event.preventDefault();
     callback(true);
     return;

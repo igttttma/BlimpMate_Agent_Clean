@@ -3,9 +3,10 @@
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system"/>
-            <!-- The stream server's self-signed certificate (stream-server/certs/cert.pem).
-                 Replace this file when the server's certificate is regenerated. -->
-            <certificates src="@raw/stream_server_cert"/>
+            <!-- The CA that signs the stream servers' certificates (stream-server's
+                 `npm run cert`), copied at build time from src/certs/stream-server-ca.pem.
+                 Any server with a certificate from this CA is trusted; no rebuild per server. -->
+            <certificates src="@raw/stream_server_ca"/>
         </trust-anchors>
     </base-config>
 </network-security-config>

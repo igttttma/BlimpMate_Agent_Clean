@@ -61,6 +61,17 @@ android {
     }
 }
 
+// The stream server CA (src/certs/stream-server-ca.pem), trusted by
+// network_security_config.xml; shared with the remote-control app
+android.sourceSets.main.res.srcDirs += "${buildDir}/generated/certRes"
+
+tasks.register("syncCert", Sync) {
+    from("${rootDir}/../../certs/stream-server-ca.pem") {
+        rename { "stream_server_ca.pem" }
+    }
+    into("${buildDir}/generated/certRes/raw")
+}
+
 dependencies {
     implementation "androidx.webkit:webkit:1.12.1"
     implementation "androidx.core:core:1.13.1"
@@ -121,4 +132,4 @@ tasks.register("syncWakeModel", Sync) {
     }
 }
 
-preBuild.dependsOn("syncSharedWeb", "syncCore", "syncBridge", "syncXiaozhi", "syncVendor", "syncModel", "syncWakeModel")
+preBuild.dependsOn("syncCert", "syncSharedWeb", "syncCore", "syncBridge", "syncXiaozhi", "syncVendor", "syncModel", "syncWakeModel")

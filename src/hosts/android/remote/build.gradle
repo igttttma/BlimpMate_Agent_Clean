@@ -49,7 +49,7 @@ android {
         }
     }
 
-    // The stream server's certificate comes from the Blimp app (one copy to replace)
+    // The stream server CA (src/certs/stream-server-ca.pem), shared with the Blimp app
     sourceSets {
         main.res.srcDirs += "${buildDir}/generated/certRes"
     }
@@ -68,8 +68,8 @@ dependencies {
 }
 
 tasks.register("syncCert", Sync) {
-    from("${rootDir}/app/src/main/res/raw") {
-        include "stream_server_cert.pem"
+    from("${rootDir}/../../certs/stream-server-ca.pem") {
+        rename { "stream_server_ca.pem" }
     }
     into("${buildDir}/generated/certRes/raw")
 }

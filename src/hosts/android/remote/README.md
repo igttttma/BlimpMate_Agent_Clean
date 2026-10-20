@@ -32,8 +32,10 @@ gradlew :remote:assembleDebug
 adb install -r remote/build/outputs/apk/debug/remote-debug.apk
 ```
 
-The stream server's certificate is taken from the Blimp app
-(`app/src/main/res/raw/stream_server_cert.pem`) at build time.
+The app trusts the CA that signs the stream servers' certificates
+(`src/certs/stream-server-ca.pem`, copied in at build time). A new server only
+needs a certificate from that CA (`npm run cert -- <ip> --out certs/<name>` in
+stream-server), not a rebuild.
 
 ## One-time setup on the device (adb)
 

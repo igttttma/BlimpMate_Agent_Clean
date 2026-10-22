@@ -203,7 +203,8 @@ export class WsProtocol extends EventTarget {
     const hello = {
       type: ClientMsg.HELLO,
       version: 1,
-      features: { mcp: true },
+      // greeting_url: the wake greeting comes as a link to play, not as reply audio
+      features: { mcp: true, greeting_url: true },
       transport: "websocket",
       audio_params: {
         format: "opus",

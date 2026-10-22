@@ -5,9 +5,18 @@ import { MouthDriver } from "./mouth-driver.mjs";
 import { OpusEncoder, OpusDecoder } from "../audio/opus-codec.mjs";
 import { AudioCapture } from "../audio/audio-capture.mjs";
 import { AudioPlayer } from "../audio/audio-player.mjs";
+import { LipSync } from "../audio/lip-sync.mjs";
 import { SilenceVad } from "../audio/vad.mjs";
 import { McpServer } from "../mcp/mcp-server.mjs";
 import { registerAllTools } from "../mcp/tools/index.mjs";
+
+// The server's HTTP side (greeting links) is on its own port of the same host
+function httpOrigin(wsUrl, httpPort) {
+  const url = new URL(wsUrl);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  if (httpPort) url.port = String(httpPort);
+  return url.origin;
+}
 
 export class Conversation extends EventTarget {
   constructor({ bridge, identity, wsUrl, wsToken, assetUrls }) {
@@ -46,6 +55,10 @@ export class Conversation extends EventTarget {
     this.bargeIn = false;
     this._listenThroughReplies = false;
     this._ttsTurn = false; // between tts start and its stop/abort: TTS owns the mouth
+    // Wake greeting: played from a link like a portal audio clip
+    this._greetingLipSync = new LipSync(this.mouth);
+    this._greetingAudio = null;
+    this._greetingWaiter = null; // resolves the wake activation's wait for its greeting
     this._sttText = "";
     this._ttsText = "";
     this._connectionState = {
@@ -338,8 +351,13 @@ export class Conversation extends EventTarget {
       }
       // Report the wake event explicitly (`wake: true`); the server answers
       // with its greeting instead of treating the phrase as user input.
+      const greeting = this._awaitGreeting();
       const reported = await this.sendText(word, { wake: true });
-      if (!reported) {
+      if (reported) {
+        // Listen once the greeting has played, so the microphone doesn't hear it
+        await greeting;
+      } else {
+        this._resolveGreetingWait();
         this._emitLog("warn", "wake-word report failed; continuing with microphone", { word });
       }
       return await this.startListening(ListeningMode.AUTO_STOP);
@@ -494,15 +512,65 @@ export class Conversation extends EventTarget {
     this._emitLog("warn", "abort", { reason });
     this.protocol.sendAbort(reason);
     if (this.player) this.player.clear();
+    if (this._greetingAudio) this._greetingAudio.pause();
     this._endTtsMouth();
     this.state.setAborted(true);
     if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
   }
 
+  // Resolves when the wake greeting has played; also when the server answers
+  // the wake some other way (reply audio, nothing) or not at all
+  _awaitGreeting(timeoutMs = 8000) {
+    this._resolveGreetingWait();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => this._resolveGreetingWait(), timeoutMs);
+      this._greetingWaiter = () => { clearTimeout(timer); resolve(); };
+    });
+  }
+
+  _resolveGreetingWait() {
+    const resolve = this._greetingWaiter;
+    this._greetingWaiter = null;
+    if (resolve) resolve();
+  }
+
+  async _playGreeting(msg) {
+    const url = new URL(msg.path, httpOrigin(this.wsUrl, msg.http_port)).toString();
+    if (this._greetingAudio) this._greetingAudio.pause();
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.crossOrigin = "anonymous";
+    this._greetingAudio = audio;
+    if (typeof msg.text === "string") {
+      this._ttsText = msg.text;
+      this.dispatchEvent(new CustomEvent("tts-text", { detail: msg.text }));
+    }
+    this.state.setDevice(DeviceState.SPEAKING);
+    const finished = new Promise((resolve) => {
+      audio.onended = audio.onerror = audio.onpause = resolve;
+    });
+    audio.src = url;
+    this._greetingLipSync.start(audio);
+    try {
+      await audio.play();
+      await finished;
+    } catch (err) {
+      this._emitLog("warn", "wake greeting failed", { error: String(err?.message || err) });
+    } finally {
+      this._greetingLipSync.stop();
+      if (this._greetingAudio === audio) this._greetingAudio = null;
+      this._resolveGreetingWait();
+    }
+  }
+
   _onJson(msg) {
     const type = msg.type;
     console.log("[ws<-] json type=" + type, msg);
-    if (type === "tts") {
+    if (type === "wake_greeting" && typeof msg.path === "string") {
+      this._playGreeting(msg);
+    } else if (type === "tts") {
+      // The answer to the wake's own abort is not the server answering the wake
+      if (!msg.interrupted) this._resolveGreetingWait();
       const st = msg.state;
       if (st === "start") {
         // In AUTO mode, server-initiated TTS means stop capturing (unless the

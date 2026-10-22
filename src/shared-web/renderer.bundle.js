@@ -33453,7 +33453,8 @@ void main(void)\r
       const hello = {
         type: ClientMsg.HELLO,
         version: 1,
-        features: { mcp: true },
+        // greeting_url: the wake greeting comes as a link to play, not as reply audio
+        features: { mcp: true, greeting_url: true },
         transport: "websocket",
         audio_params: {
           format: "opus",
@@ -34013,6 +34014,51 @@ void main(void)\r
     }
   };
 
+  // src/xiaozhi/audio/lip-sync.mjs
+  var LIP_SYNC_MS = 40;
+  var LipSync2 = class {
+    constructor(mouth) {
+      this.mouth = mouth;
+      this.ctx = null;
+      this.source = null;
+      this.timer = null;
+    }
+    start(audio) {
+      this.stop();
+      try {
+        this.ctx ||= new AudioContext();
+        this.ctx.resume().catch(() => {
+        });
+        const source = this.ctx.createMediaElementSource(audio);
+        const analyser = this.ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        analyser.connect(this.ctx.destination);
+        this.source = source;
+        const buf = new Float32Array(analyser.fftSize);
+        this.mouth.begin();
+        this.timer = setInterval(() => {
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (const v2 of buf) sum += v2 * v2;
+          this.mouth.feedRms(Math.sqrt(sum / buf.length));
+        }, LIP_SYNC_MS);
+      } catch {
+      }
+    }
+    stop() {
+      clearInterval(this.timer);
+      this.timer = null;
+      if (!this.source) return;
+      try {
+        this.source.disconnect();
+      } catch {
+      }
+      this.source = null;
+      this.mouth.end();
+    }
+  };
+
   // src/xiaozhi/audio/vad.mjs
   var SilenceVad = class {
     constructor() {
@@ -34471,6 +34517,12 @@ void main(void)\r
   }
 
   // src/xiaozhi/conversation/conversation.mjs
+  function httpOrigin(wsUrl, httpPort) {
+    const url2 = new URL(wsUrl);
+    url2.protocol = url2.protocol === "wss:" ? "https:" : "http:";
+    if (httpPort) url2.port = String(httpPort);
+    return url2.origin;
+  }
   var Conversation = class extends EventTarget {
     constructor({ bridge, identity, wsUrl, wsToken, assetUrls: assetUrls2 }) {
       super();
@@ -34504,6 +34556,9 @@ void main(void)\r
       this.bargeIn = false;
       this._listenThroughReplies = false;
       this._ttsTurn = false;
+      this._greetingLipSync = new LipSync2(this.mouth);
+      this._greetingAudio = null;
+      this._greetingWaiter = null;
       this._sttText = "";
       this._ttsText = "";
       this._connectionState = {
@@ -34766,8 +34821,12 @@ void main(void)\r
             return false;
           }
         }
+        const greeting = this._awaitGreeting();
         const reported = await this.sendText(word, { wake: true });
-        if (!reported) {
+        if (reported) {
+          await greeting;
+        } else {
+          this._resolveGreetingWait();
           this._emitLog("warn", "wake-word report failed; continuing with microphone", { word });
         }
         return await this.startListening(ListeningMode.AUTO_STOP);
@@ -34919,14 +34978,63 @@ void main(void)\r
       this._emitLog("warn", "abort", { reason });
       this.protocol.sendAbort(reason);
       if (this.player) this.player.clear();
+      if (this._greetingAudio) this._greetingAudio.pause();
       this._endTtsMouth();
       this.state.setAborted(true);
       if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
     }
+    // Resolves when the wake greeting has played; also when the server answers
+    // the wake some other way (reply audio, nothing) or not at all
+    _awaitGreeting(timeoutMs = 8e3) {
+      this._resolveGreetingWait();
+      return new Promise((resolve2) => {
+        const timer = setTimeout(() => this._resolveGreetingWait(), timeoutMs);
+        this._greetingWaiter = () => {
+          clearTimeout(timer);
+          resolve2();
+        };
+      });
+    }
+    _resolveGreetingWait() {
+      const resolve2 = this._greetingWaiter;
+      this._greetingWaiter = null;
+      if (resolve2) resolve2();
+    }
+    async _playGreeting(msg) {
+      const url2 = new URL(msg.path, httpOrigin(this.wsUrl, msg.http_port)).toString();
+      if (this._greetingAudio) this._greetingAudio.pause();
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.crossOrigin = "anonymous";
+      this._greetingAudio = audio;
+      if (typeof msg.text === "string") {
+        this._ttsText = msg.text;
+        this.dispatchEvent(new CustomEvent("tts-text", { detail: msg.text }));
+      }
+      this.state.setDevice(DeviceState.SPEAKING);
+      const finished = new Promise((resolve2) => {
+        audio.onended = audio.onerror = audio.onpause = resolve2;
+      });
+      audio.src = url2;
+      this._greetingLipSync.start(audio);
+      try {
+        await audio.play();
+        await finished;
+      } catch (err) {
+        this._emitLog("warn", "wake greeting failed", { error: String(err?.message || err) });
+      } finally {
+        this._greetingLipSync.stop();
+        if (this._greetingAudio === audio) this._greetingAudio = null;
+        this._resolveGreetingWait();
+      }
+    }
     _onJson(msg) {
       const type = msg.type;
       console.log("[ws<-] json type=" + type, msg);
-      if (type === "tts") {
+      if (type === "wake_greeting" && typeof msg.path === "string") {
+        this._playGreeting(msg);
+      } else if (type === "tts") {
+        if (!msg.interrupted) this._resolveGreetingWait();
         const st = msg.state;
         if (st === "start") {
           if (this.state.mode === ListeningMode.AUTO_STOP && this.state.device === DeviceState.LISTENING && !this._listenThroughReplies) {
@@ -36993,49 +37101,6 @@ void main(void)\r
 
   // src/remote-control/media-playback.mjs
   var ACTIVATION_WAIT_MS = 3e3;
-  var LIP_SYNC_MS = 40;
-  var LipSync = class {
-    constructor(mouth) {
-      this.mouth = mouth;
-      this.ctx = null;
-      this.source = null;
-      this.timer = null;
-    }
-    start(audio) {
-      this.stop();
-      try {
-        this.ctx ||= new AudioContext();
-        this.ctx.resume().catch(() => {
-        });
-        const source = this.ctx.createMediaElementSource(audio);
-        const analyser = this.ctx.createAnalyser();
-        analyser.fftSize = 1024;
-        source.connect(analyser);
-        analyser.connect(this.ctx.destination);
-        this.source = source;
-        const buf = new Float32Array(analyser.fftSize);
-        this.mouth.begin();
-        this.timer = setInterval(() => {
-          analyser.getFloatTimeDomainData(buf);
-          let sum = 0;
-          for (const v2 of buf) sum += v2 * v2;
-          this.mouth.feedRms(Math.sqrt(sum / buf.length));
-        }, LIP_SYNC_MS);
-      } catch {
-      }
-    }
-    stop() {
-      clearInterval(this.timer);
-      this.timer = null;
-      if (!this.source) return;
-      try {
-        this.source.disconnect();
-      } catch {
-      }
-      this.source = null;
-      this.mouth.end();
-    }
-  };
   var VIDEO_STYLE = `
 .bm-video { position: fixed; inset: 0; z-index: 800; background: #000; display: none; }
 .bm-video.on { display: block; }
@@ -37512,7 +37577,7 @@ void main(void)\r
   };
 
   // src/remote-control/index.mjs
-  function httpOrigin(wsUrl, httpPort) {
+  function httpOrigin2(wsUrl, httpPort) {
     const url2 = new URL(wsUrl);
     url2.protocol = url2.protocol === "wss:" ? "https:" : "http:";
     if (httpPort) url2.port = String(httpPort);
@@ -37578,7 +37643,7 @@ void main(void)\r
       if (msg.type === "play" && typeof msg.path === "string") {
         const kind = msg.kind === "video" ? "video" : "audio";
         const cached = kind === "video" ? videos.urlFor(msg.id) : null;
-        const url2 = cached || new URL(msg.path, httpOrigin(conversation.wsUrl, msg.http_port)).toString();
+        const url2 = cached || new URL(msg.path, httpOrigin2(conversation.wsUrl, msg.http_port)).toString();
         playback.play({ kind, id: msg.id, title: msg.title || (kind === "video" ? "Video" : "Audio"), url: url2, source: cached ? "cache" : "stream" });
       } else if (msg.type === "settings") {
         const bargeIn = msg.barge_in === true;
@@ -37587,7 +37652,7 @@ void main(void)\r
         }
         conversation.bargeIn = bargeIn;
       } else if (msg.type === "videos" && Array.isArray(msg.videos)) {
-        const origin = httpOrigin(conversation.wsUrl, msg.http_port);
+        const origin = httpOrigin2(conversation.wsUrl, msg.http_port);
         videos.sync(msg.videos.map((v2) => ({ ...v2, url: new URL(v2.path, origin).toString() })));
       } else if (msg.type === "stop_audio") {
         playback.stop("stopped from the portal");

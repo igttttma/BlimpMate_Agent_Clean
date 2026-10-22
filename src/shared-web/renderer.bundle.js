@@ -34939,7 +34939,7 @@ void main(void)\r
         } else if (st === "stop") {
           this._endTtsMouth();
           if (this._listenThroughReplies && this._sendingFrames) {
-            if (this.player) this.player.clear();
+            if (msg.interrupted && this.player) this.player.clear();
             this.state.setDevice(DeviceState.LISTENING);
           } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
             this.state.setDevice(DeviceState.IDLE);

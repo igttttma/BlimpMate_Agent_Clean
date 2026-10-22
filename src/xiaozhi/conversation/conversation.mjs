@@ -517,10 +517,10 @@ export class Conversation extends EventTarget {
       } else if (st === "stop") {
         this._endTtsMouth();
         if (this._listenThroughReplies && this._sendingFrames) {
-          // Still listening. A normal stop comes after playback finished; an
-          // interrupt comes at once, so drop the reply audio still buffered.
+          // Still listening. A normal stop can arrive while the last ~100 ms
+          // still play, so only an interrupt drops the buffered reply audio.
           // No new listen start: it would reset the server's audio mid-sentence.
-          if (this.player) this.player.clear();
+          if (msg.interrupted && this.player) this.player.clear();
           this.state.setDevice(DeviceState.LISTENING);
         } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
           // After TTS in auto mode, resume listening for the next turn.

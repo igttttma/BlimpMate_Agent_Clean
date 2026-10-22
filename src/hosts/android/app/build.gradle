@@ -77,7 +77,8 @@ dependencies {
     implementation "androidx.core:core:1.13.1"
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
-    implementation files("libs/sherpa-onnx-1.13.4.aar")
+    // Wake-word models (openWakeWord), see src/wake-models/README.md
+    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.20.0"
 }
 
 // Sync (not Copy): prunes stale files from each assets/* subdir so a renamed/removed
@@ -118,18 +119,11 @@ tasks.register("syncModel", Sync) {
 }
 
 tasks.register("syncWakeModel", Sync) {
-    into("${projectDir}/src/main/assets/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01")
-
-    from("${rootDir}/../../../host-service/data/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01") {
-        include "tokens.txt"
-        include "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
-        include "decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
-        include "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
-        rename { name -> name.replace(".int8.onnx", ".onnx") }
+    from("${rootDir}/../../wake-models") {
+        include "*.onnx"
+        include "wakewords.json"
     }
-    from("${rootDir}/../../../host-service/wake_word/keywords.en.txt") {
-        rename { "keywords.txt" }
-    }
+    into("${projectDir}/src/main/assets/wake-models")
 }
 
 preBuild.dependsOn("syncCert", "syncSharedWeb", "syncCore", "syncBridge", "syncXiaozhi", "syncVendor", "syncModel", "syncWakeModel")

@@ -14,17 +14,12 @@ import android.webkit.WebView;
 
 import androidx.core.content.ContextCompat;
 
-import com.k2fsa.sherpa.onnx.FeatureConfigKt;
-import com.k2fsa.sherpa.onnx.KeywordSpotter;
-import com.k2fsa.sherpa.onnx.KeywordSpotterConfig;
-import com.k2fsa.sherpa.onnx.KeywordSpotterKt;
-import com.k2fsa.sherpa.onnx.OnlineModelConfig;
-import com.k2fsa.sherpa.onnx.OnlineStream;
-
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -32,15 +27,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Device-local Sherpa-ONNX keyword spotting exposed to the shared WebView. */
+/** Device-local wake-word detection (openWakeWord models) exposed to the shared WebView. */
 public final class WakeWordBridge {
     private static final String TAG = "BlimpMateWake";
     private static final int SAMPLE_RATE = 16000;
     private static final String WAKE_PHRASE = "Hey Blimp";
-    // Keyword sets the detector can listen for. "wake" uses the model's
-    // keywords.txt; others are given to the stream directly (BPE tokens from
-    // the model's bpe.model, "@label" names the result).
-    private static final String KEYWORDS_ANSWER = "\u2581AN S W ER @answer";
+    private static final String MODE = "openwakeword";
+    // Keyword sets the detector can listen for: "wake" (Hey Blimp) or "answer"
+    // (incoming calls), each a trained model in assets/wake-models/ with its
+    // threshold in wakewords.json
     private volatile String keywordSet = "wake";
 
     private final Activity activity;
@@ -57,12 +52,15 @@ public final class WakeWordBridge {
     private volatile long audioSamples;
     private volatile float lastAudioRms;
     private volatile float peakAudioRms;
+    // The highest score in about the last second, for tuning thresholds
+    private volatile float recentPeakScore;
     // Debug builds only: the last DEBUG_SECONDS of mic audio, for dumpDebugAudio().
     private static final int DEBUG_SECONDS = 10;
     private short[] debugRing;
     private int debugPos;
     private boolean debugWrapped;
-    private KeywordSpotter spotter;
+    private OpenWakeWord detector;
+    private JSONObject thresholds;
 
     public WakeWordBridge(Activity activity, WebView webView) {
         this.activity = activity;
@@ -154,9 +152,9 @@ public final class WakeWordBridge {
         stopRecorder();
         executor.shutdownNow();
         synchronized (this) {
-            if (spotter != null) {
-                try { spotter.release(); } catch (Exception ignored) {}
-                spotter = null;
+            if (detector != null) {
+                detector.close();
+                detector = null;
             }
         }
     }
@@ -181,32 +179,34 @@ public final class WakeWordBridge {
         });
     }
 
-    private synchronized KeywordSpotter getSpotter() {
-        if (spotter != null) return spotter;
-        OnlineModelConfig modelConfig = KeywordSpotterKt.getKwsModelConfig(1);
-        if (modelConfig == null) throw new IllegalStateException("English KWS model config unavailable");
-        KeywordSpotterConfig config = new KeywordSpotterConfig(
-                FeatureConfigKt.getFeatureConfig(SAMPLE_RATE, 80),
-                modelConfig,
-                4,
-                KeywordSpotterKt.getKeywordsFile(1),
-                1.0f,
-                0.1f,
-                1
-        );
-        spotter = new KeywordSpotter(activity.getAssets(), config);
-        return spotter;
+    private synchronized OpenWakeWord getDetector() throws Exception {
+        if (detector == null) {
+            thresholds = new JSONObject(readAsset("wake-models/wakewords.json"));
+            detector = new OpenWakeWord(activity.getAssets(), "hey_blimp", "answer");
+        }
+        return detector;
+    }
+
+    private static String modelFor(String set) {
+        return "answer".equals(set) ? "answer" : "hey_blimp";
+    }
+
+    private String readAsset(String path) throws Exception {
+        try (InputStream in = activity.getAssets().open(path); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return out.toString("UTF-8");
+        }
     }
 
     private void runDetector() {
-        OnlineStream stream = null;
         AudioRecord recorder = null;
         try {
             lastError = "";
-            KeywordSpotter kws = getSpotter();
+            OpenWakeWord oww = getDetector();
+            oww.reset();
             String streamSet = keywordSet;
-            stream = kws.createStream(keywordsFor(streamSet));
-            if (stream.getPtr() == 0L) throw new IllegalStateException("failed to create KWS stream");
 
             int minBytes = AudioRecord.getMinBufferSize(
                     SAMPLE_RATE,
@@ -232,37 +232,49 @@ public final class WakeWordBridge {
             running = true;
             postStatus(true, "listening");
 
-            short[] pcm = new short[SAMPLE_RATE / 10];
+            short[] pcm = new short[OpenWakeWord.CHUNK];
             final boolean debuggable = isDebuggable();
+            final float[] best = {0f};
+            // Consecutive 80 ms frames at or above the threshold; a word fires after `patience` of them
+            final int[] streak = {0};
+            int chunks = 0;
             while (requested && !released) {
                 int count = recorder.read(pcm, 0, pcm.length);
                 if (count <= 0) continue;
                 if (debuggable) recordDebugAudio(pcm, count);
-                float[] samples = new float[count];
                 double sumSquares = 0;
                 for (int i = 0; i < count; i++) {
-                    samples[i] = pcm[i] / 32768.0f;
-                    sumSquares += samples[i] * samples[i];
+                    float v = pcm[i] / 32768.0f;
+                    sumSquares += v * v;
                 }
                 lastAudioRms = (float) Math.sqrt(sumSquares / count);
                 peakAudioRms = Math.max(peakAudioRms, lastAudioRms);
                 audioSamples += count;
                 if (!streamSet.equals(keywordSet)) {
-                    // Switched keyword sets while running: start a fresh stream
-                    stream.release();
+                    // Switched keyword sets while running: start from fresh audio
                     streamSet = keywordSet;
-                    stream = kws.createStream(keywordsFor(streamSet));
+                    oww.reset();
+                    streak[0] = 0;
                 }
-                stream.acceptWaveform(samples, SAMPLE_RATE);
-                while (kws.isReady(stream)) {
-                    kws.decode(stream);
-                    String keyword = kws.getResult(stream).getKeyword();
-                    if (keyword != null && !keyword.trim().isEmpty()) {
-                        kws.reset(stream);
-                        requested = false;
-                        postWake("answer".equals(streamSet) ? "answer" : WAKE_PHRASE, streamSet);
-                        break;
-                    }
+                String word = modelFor(streamSet);
+                JSONObject tuning = thresholds.getJSONObject(word);
+                final float threshold = (float) tuning.getDouble("threshold");
+                final int patience = tuning.optInt("patience", 1);
+                best[0] = 0f;
+                oww.accept(pcm, count, word, (score) -> {
+                    best[0] = Math.max(best[0], score);
+                    streak[0] = score >= threshold ? streak[0] + 1 : 0;
+                });
+                if (chunks++ % 12 == 0) recentPeakScore = 0f;
+                recentPeakScore = Math.max(recentPeakScore, best[0]);
+                if (streak[0] >= patience) {
+                    Log.i(TAG, "Detected " + word + " (score " + best[0] + ", threshold " + threshold
+                            + ", " + streak[0] + " frames)");
+                    streak[0] = 0;
+                    oww.reset();
+                    requested = false;
+                    postWake("answer".equals(streamSet) ? "answer" : WAKE_PHRASE, streamSet);
+                    break;
                 }
             }
         } catch (Throwable error) {
@@ -273,9 +285,6 @@ public final class WakeWordBridge {
             if (recorder != null) {
                 try { recorder.stop(); } catch (Exception ignored) {}
                 recorder.release();
-            }
-            if (stream != null) {
-                try { stream.release(); } catch (Exception ignored) {}
             }
         }
     }
@@ -291,12 +300,13 @@ public final class WakeWordBridge {
         JSONObject json = new JSONObject();
         try {
             json.put("running", isRunning);
-            json.put("mode", "sherpa-native");
+            json.put("mode", MODE);
             json.put("audio_backend", "android-audiorecord");
             json.put("message", message == null ? "" : message);
             json.put("audio_samples", audioSamples);
             json.put("last_audio_rms", lastAudioRms);
             json.put("peak_audio_rms", peakAudioRms);
+            json.put("recent_peak_score", recentPeakScore);
         } catch (Exception ignored) {}
         return json.toString();
     }
@@ -305,17 +315,13 @@ public final class WakeWordBridge {
         postEvent("status", status(isRunning, message));
     }
 
-    private static String keywordsFor(String set) {
-        return "answer".equals(set) ? KEYWORDS_ANSWER : "";
-    }
-
     private void postWake(String word, String set) {
         JSONObject json = new JSONObject();
         try {
             json.put("type", "wake");
             json.put("word", word);
             json.put("keywords", set);
-            json.put("source", "sherpa-native");
+            json.put("source", MODE);
             json.put("timestamp", System.currentTimeMillis() / 1000.0);
         } catch (Exception ignored) {}
         postEvent("wake", json.toString());

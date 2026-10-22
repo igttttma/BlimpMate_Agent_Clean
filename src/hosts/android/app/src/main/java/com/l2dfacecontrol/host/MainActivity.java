@@ -308,7 +308,7 @@ public final class MainActivity extends Activity {
         "(function(){\n" +
         "  if (!window.__nativeWakeWordRaw) return;\n" +
         "  var handlers = new Set();\n" +
-        "  var lastStatus = { running: false, mode: 'sherpa-native' };\n" +
+        "  var lastStatus = { running: false, mode: 'openwakeword' };\n" +
         "  function parse(raw){ try { return JSON.parse(raw || '{}'); } catch (_) { return {}; } }\n" +
         "  window.__nativeWakeWordDispatch = function(type, payloadB64){\n" +
         "    try {\n" +

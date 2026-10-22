@@ -1,0 +1,4 @@
+{
+  "hey_blimp": {"threshold": 0.7, "patience": 3},
+  "answer": {"threshold": 0.7, "patience": 3}
+}

@@ -34016,7 +34016,7 @@ void main(void)\r
 
   // src/xiaozhi/audio/lip-sync.mjs
   var LIP_SYNC_MS = 40;
-  var LipSync2 = class {
+  var LipSync = class {
     constructor(mouth) {
       this.mouth = mouth;
       this.ctx = null;
@@ -34556,7 +34556,7 @@ void main(void)\r
       this.bargeIn = false;
       this._listenThroughReplies = false;
       this._ttsTurn = false;
-      this._greetingLipSync = new LipSync2(this.mouth);
+      this._greetingLipSync = new LipSync(this.mouth);
       this._greetingAudio = null;
       this._greetingWaiter = null;
       this._sttText = "";

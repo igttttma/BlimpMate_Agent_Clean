@@ -1,4 +1,5 @@
 import { DeviceState } from "../xiaozhi/index.mjs";
+import { LipSync } from "../xiaozhi/audio/lip-sync.mjs";
 
 // "Play now" from the server portal, audio or video; one clip at a time (a
 // new one replaces the current one). Playing takes the speaker from whatever

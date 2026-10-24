@@ -34014,50 +34014,64 @@ void main(void)\r
     }
   };
 
-  // src/xiaozhi/audio/lip-sync.mjs
-  var LIP_SYNC_MS = 40;
-  var LipSync = class {
-    constructor(mouth) {
-      this.mouth = mouth;
-      this.ctx = null;
-      this.source = null;
-      this.timer = null;
-    }
-    start(audio) {
-      this.stop();
-      try {
-        this.ctx ||= new AudioContext();
-        this.ctx.resume().catch(() => {
-        });
-        const source = this.ctx.createMediaElementSource(audio);
-        const analyser = this.ctx.createAnalyser();
-        analyser.fftSize = 1024;
-        source.connect(analyser);
-        analyser.connect(this.ctx.destination);
-        this.source = source;
-        const buf = new Float32Array(analyser.fftSize);
-        this.mouth.begin();
-        this.timer = setInterval(() => {
-          analyser.getFloatTimeDomainData(buf);
-          let sum = 0;
-          for (const v2 of buf) sum += v2 * v2;
-          this.mouth.feedRms(Math.sqrt(sum / buf.length));
-        }, LIP_SYNC_MS);
-      } catch {
+  // src/xiaozhi/audio/wav.mjs
+  function decodeWav(arrayBuffer, targetRate) {
+    const view = new DataView(arrayBuffer);
+    const tag = (at) => String.fromCharCode(
+      view.getUint8(at),
+      view.getUint8(at + 1),
+      view.getUint8(at + 2),
+      view.getUint8(at + 3)
+    );
+    if (view.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("not a WAV file");
+    let fmt = null;
+    let data = null;
+    for (let at = 12; at + 8 <= view.byteLength; ) {
+      const id = tag(at);
+      const size = view.getUint32(at + 4, true);
+      const body = at + 8;
+      if (id === "fmt ") {
+        fmt = {
+          format: view.getUint16(body, true),
+          channels: view.getUint16(body + 2, true),
+          rate: view.getUint32(body + 4, true),
+          bits: view.getUint16(body + 14, true)
+        };
+      } else if (id === "data") {
+        data = { offset: body, size: Math.min(size, view.byteLength - body) };
+        break;
       }
+      at = body + size + (size & 1);
     }
-    stop() {
-      clearInterval(this.timer);
-      this.timer = null;
-      if (!this.source) return;
-      try {
-        this.source.disconnect();
-      } catch {
+    if (!fmt || !data) throw new Error("WAV without fmt or data chunk");
+    const pcm16 = fmt.format === 1 && fmt.bits === 16;
+    const float32 = fmt.format === 3 && fmt.bits === 32;
+    if (!pcm16 && !float32) throw new Error(`unsupported WAV format ${fmt.format}/${fmt.bits}-bit`);
+    const bytes = fmt.bits / 8;
+    const frames = Math.floor(data.size / (bytes * fmt.channels));
+    const mono = new Float32Array(frames);
+    for (let i2 = 0; i2 < frames; i2++) {
+      let sum = 0;
+      for (let c2 = 0; c2 < fmt.channels; c2++) {
+        const at = data.offset + (i2 * fmt.channels + c2) * bytes;
+        sum += pcm16 ? view.getInt16(at, true) / 32768 : view.getFloat32(at, true);
       }
-      this.source = null;
-      this.mouth.end();
+      mono[i2] = sum / fmt.channels;
     }
-  };
+    return resample(mono, fmt.rate, targetRate);
+  }
+  function resample(samples, fromRate, toRate) {
+    if (!toRate || fromRate === toRate) return samples;
+    const out = new Float32Array(Math.floor(samples.length * toRate / fromRate));
+    const step = fromRate / toRate;
+    for (let i2 = 0; i2 < out.length; i2++) {
+      const pos = i2 * step;
+      const base = Math.floor(pos);
+      const next = Math.min(base + 1, samples.length - 1);
+      out[i2] = samples[base] + (samples[next] - samples[base]) * (pos - base);
+    }
+    return out;
+  }
 
   // src/xiaozhi/audio/vad.mjs
   var SilenceVad = class {
@@ -34556,8 +34570,7 @@ void main(void)\r
       this.bargeIn = false;
       this._listenThroughReplies = false;
       this._ttsTurn = false;
-      this._greetingLipSync = new LipSync(this.mouth);
-      this._greetingAudio = null;
+      this._greetingStop = null;
       this._greetingWaiter = null;
       this._sttText = "";
       this._ttsText = "";
@@ -34978,7 +34991,7 @@ void main(void)\r
       this._emitLog("warn", "abort", { reason });
       this.protocol.sendAbort(reason);
       if (this.player) this.player.clear();
-      if (this._greetingAudio) this._greetingAudio.pause();
+      if (this._greetingStop) this._greetingStop();
       this._endTtsMouth();
       this.state.setAborted(true);
       if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
@@ -35000,31 +35013,52 @@ void main(void)\r
       this._greetingWaiter = null;
       if (resolve2) resolve2();
     }
+    // The clip plays through the reply player, the same path as reply audio (an
+    // <audio> element through a second AudioContext stayed silent on the Blimp)
     async _playGreeting(msg) {
       const url2 = new URL(msg.path, httpOrigin(this.wsUrl, msg.http_port)).toString();
-      if (this._greetingAudio) this._greetingAudio.pause();
-      const audio = new Audio();
-      audio.preload = "auto";
-      audio.crossOrigin = "anonymous";
-      this._greetingAudio = audio;
+      if (this._greetingStop) {
+        this._greetingStop();
+        if (this.player) this.player.clear();
+      }
+      let stopped = false;
+      let endWait = null;
+      const stop = () => {
+        stopped = true;
+        if (endWait) endWait();
+      };
+      this._greetingStop = stop;
       if (typeof msg.text === "string") {
         this._ttsText = msg.text;
         this.dispatchEvent(new CustomEvent("tts-text", { detail: msg.text }));
       }
-      this.state.setDevice(DeviceState.SPEAKING);
-      const finished = new Promise((resolve2) => {
-        audio.onended = audio.onerror = audio.onpause = resolve2;
-      });
-      audio.src = url2;
-      this._greetingLipSync.start(audio);
+      let playing = false;
       try {
-        await audio.play();
-        await finished;
+        const res = await fetch(url2, { cache: "force-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const pcm = decodeWav(await res.arrayBuffer(), APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE);
+        if (stopped || !this.player) return;
+        this.state.setDevice(DeviceState.SPEAKING);
+        this._beginTtsMouth();
+        playing = true;
+        const ms = pcm.length / APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE * 1e3 + 150;
+        await this.player.resume();
+        this.player.push(pcm);
+        await new Promise((resolve2) => {
+          const timer = setTimeout(resolve2, ms);
+          endWait = () => {
+            clearTimeout(timer);
+            resolve2();
+          };
+          if (stopped) endWait();
+        });
       } catch (err) {
-        this._emitLog("warn", "wake greeting failed", { error: String(err?.message || err) });
+        this._emitLog("warn", "wake greeting failed", { url: url2, error: String(err?.message || err) });
       } finally {
-        this._greetingLipSync.stop();
-        if (this._greetingAudio === audio) this._greetingAudio = null;
+        if (this._greetingStop === stop) {
+          this._greetingStop = null;
+          if (playing) this._endTtsMouth();
+        }
         this._resolveGreetingWait();
       }
     }
@@ -37096,6 +37130,51 @@ void main(void)\r
     }
     _status(state, reason = "") {
       this.dispatchEvent(new CustomEvent("status", { detail: { state, reason: reason || "" } }));
+    }
+  };
+
+  // src/xiaozhi/audio/lip-sync.mjs
+  var LIP_SYNC_MS = 40;
+  var LipSync = class {
+    constructor(mouth) {
+      this.mouth = mouth;
+      this.ctx = null;
+      this.source = null;
+      this.timer = null;
+    }
+    start(audio) {
+      this.stop();
+      try {
+        this.ctx ||= new AudioContext();
+        this.ctx.resume().catch(() => {
+        });
+        const source = this.ctx.createMediaElementSource(audio);
+        const analyser = this.ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        analyser.connect(this.ctx.destination);
+        this.source = source;
+        const buf = new Float32Array(analyser.fftSize);
+        this.mouth.begin();
+        this.timer = setInterval(() => {
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (const v2 of buf) sum += v2 * v2;
+          this.mouth.feedRms(Math.sqrt(sum / buf.length));
+        }, LIP_SYNC_MS);
+      } catch {
+      }
+    }
+    stop() {
+      clearInterval(this.timer);
+      this.timer = null;
+      if (!this.source) return;
+      try {
+        this.source.disconnect();
+      } catch {
+      }
+      this.source = null;
+      this.mouth.end();
     }
   };
 

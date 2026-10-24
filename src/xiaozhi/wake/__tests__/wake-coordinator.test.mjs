@@ -51,6 +51,8 @@ async function testConversationWakeInterruptOrder() {
     capture: { _node: {} },
     _emitLog() {},
     dispatchEvent() {},
+    _awaitGreeting() { return Promise.resolve(); },
+    _resolveGreetingWait() {},
     async abort(reason) { calls.push(`abort:${reason}`); },
     async stopListening() { calls.push("stop-listening"); this._sendingFrames = false; },
     async connect() { calls.push("connect"); return true; },

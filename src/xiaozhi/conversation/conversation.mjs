@@ -5,7 +5,8 @@ import { MouthDriver } from "./mouth-driver.mjs";
 import { OpusEncoder, OpusDecoder } from "../audio/opus-codec.mjs";
 import { AudioCapture } from "../audio/audio-capture.mjs";
 import { AudioPlayer } from "../audio/audio-player.mjs";
-import { LipSync } from "../audio/lip-sync.mjs";
+import { decodeWav } from "../audio/wav.mjs";
+import { APP_CONFIG } from "../config/app-config.mjs";
 import { SilenceVad } from "../audio/vad.mjs";
 import { McpServer } from "../mcp/mcp-server.mjs";
 import { registerAllTools } from "../mcp/tools/index.mjs";
@@ -55,9 +56,8 @@ export class Conversation extends EventTarget {
     this.bargeIn = false;
     this._listenThroughReplies = false;
     this._ttsTurn = false; // between tts start and its stop/abort: TTS owns the mouth
-    // Wake greeting: played from a link like a portal audio clip
-    this._greetingLipSync = new LipSync(this.mouth);
-    this._greetingAudio = null;
+    // Wake greeting: fetched from a link and played through the reply player
+    this._greetingStop = null; // ends the greeting that is playing
     this._greetingWaiter = null; // resolves the wake activation's wait for its greeting
     this._sttText = "";
     this._ttsText = "";
@@ -512,7 +512,7 @@ export class Conversation extends EventTarget {
     this._emitLog("warn", "abort", { reason });
     this.protocol.sendAbort(reason);
     if (this.player) this.player.clear();
-    if (this._greetingAudio) this._greetingAudio.pause();
+    if (this._greetingStop) this._greetingStop();
     this._endTtsMouth();
     this.state.setAborted(true);
     if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
@@ -534,31 +534,49 @@ export class Conversation extends EventTarget {
     if (resolve) resolve();
   }
 
+  // The clip plays through the reply player, the same path as reply audio (an
+  // <audio> element through a second AudioContext stayed silent on the Blimp)
   async _playGreeting(msg) {
     const url = new URL(msg.path, httpOrigin(this.wsUrl, msg.http_port)).toString();
-    if (this._greetingAudio) this._greetingAudio.pause();
-    const audio = new Audio();
-    audio.preload = "auto";
-    audio.crossOrigin = "anonymous";
-    this._greetingAudio = audio;
+    if (this._greetingStop) {
+      this._greetingStop();
+      if (this.player) this.player.clear();
+    }
+    let stopped = false;
+    let endWait = null;
+    const stop = () => { stopped = true; if (endWait) endWait(); };
+    this._greetingStop = stop;
     if (typeof msg.text === "string") {
       this._ttsText = msg.text;
       this.dispatchEvent(new CustomEvent("tts-text", { detail: msg.text }));
     }
-    this.state.setDevice(DeviceState.SPEAKING);
-    const finished = new Promise((resolve) => {
-      audio.onended = audio.onerror = audio.onpause = resolve;
-    });
-    audio.src = url;
-    this._greetingLipSync.start(audio);
+    let playing = false;
     try {
-      await audio.play();
-      await finished;
+      // The link never expires, so the browser cache can keep the clip
+      const res = await fetch(url, { cache: "force-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const pcm = decodeWav(await res.arrayBuffer(), APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE);
+      if (stopped || !this.player) return;
+      this.state.setDevice(DeviceState.SPEAKING);
+      this._beginTtsMouth();
+      playing = true;
+      // The player has no end event: wait out the clip (plus its output buffer).
+      // Measured before push(), which transfers (empties) the buffer.
+      const ms = pcm.length / APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE * 1000 + 150;
+      await this.player.resume();
+      this.player.push(pcm);
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        endWait = () => { clearTimeout(timer); resolve(); };
+        if (stopped) endWait();
+      });
     } catch (err) {
-      this._emitLog("warn", "wake greeting failed", { error: String(err?.message || err) });
+      this._emitLog("warn", "wake greeting failed", { url, error: String(err?.message || err) });
     } finally {
-      this._greetingLipSync.stop();
-      if (this._greetingAudio === audio) this._greetingAudio = null;
+      if (this._greetingStop === stop) {
+        this._greetingStop = null;
+        if (playing) this._endTtsMouth();
+      }
       this._resolveGreetingWait();
     }
   }

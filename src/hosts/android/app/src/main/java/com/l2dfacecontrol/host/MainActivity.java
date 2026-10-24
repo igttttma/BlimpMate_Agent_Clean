@@ -36,6 +36,7 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private WakeWordBridge wakeWordBridge;
     private WsBridge wsBridge;
+    private CallModeVolume callModeVolume;
     private PermissionRequest pendingPermissionRequest;
     private String remoteDisplayUrl;
     private boolean isKioskMode;
@@ -81,6 +82,9 @@ public final class MainActivity extends Activity {
             webView.addJavascriptInterface(wsBridge, "__nativeWsRaw");
             wakeWordBridge = new WakeWordBridge(this, webView);
             webView.addJavascriptInterface(wakeWordBridge, "__nativeWakeWordRaw");
+            // Media + call volume at max; replies (mic open, call mode) as loud as the greeting
+            callModeVolume = new CallModeVolume(this);
+            callModeVolume.start();
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(
@@ -245,6 +249,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         reloadHandler.removeCallbacksAndMessages(null);
+        if (callModeVolume != null) {
+            callModeVolume.stop();
+            callModeVolume = null;
+        }
         if (wakeWordBridge != null) {
             wakeWordBridge.release();
             wakeWordBridge = null;

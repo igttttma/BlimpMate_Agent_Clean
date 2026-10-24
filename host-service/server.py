@@ -1,4 +1,4 @@
-"""Minimal local service for Sherpa wake-word detection."""
+"""Minimal local service for openWakeWord wake-word detection."""
 from __future__ import annotations
 
 import os

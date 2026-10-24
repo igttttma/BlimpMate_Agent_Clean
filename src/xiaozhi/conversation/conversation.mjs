@@ -5,19 +5,12 @@ import { MouthDriver } from "./mouth-driver.mjs";
 import { OpusEncoder, OpusDecoder } from "../audio/opus-codec.mjs";
 import { AudioCapture } from "../audio/audio-capture.mjs";
 import { AudioPlayer } from "../audio/audio-player.mjs";
-import { decodeWav } from "../audio/wav.mjs";
-import { APP_CONFIG } from "../config/app-config.mjs";
 import { SilenceVad } from "../audio/vad.mjs";
 import { McpServer } from "../mcp/mcp-server.mjs";
 import { registerAllTools } from "../mcp/tools/index.mjs";
 
-// The server's HTTP side (greeting links) is on its own port of the same host
-function httpOrigin(wsUrl, httpPort) {
-  const url = new URL(wsUrl);
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  if (httpPort) url.port = String(httpPort);
-  return url.origin;
-}
+// Well inside the server's idle limit (180 s with the default settings)
+const IDLE_PING_MS = 60000;
 
 export class Conversation extends EventTarget {
   constructor({ bridge, identity, wsUrl, wsToken, assetUrls }) {
@@ -39,7 +32,8 @@ export class Conversation extends EventTarget {
       });
     });
     registerAllTools(this.mcp, bridge, {
-      endSession: () => this.endSession()
+      // The AI ends the conversation; the link stays for the next one
+      endSession: () => this.endSession({ disconnect: false })
     });
 
     this.protocol = null;
@@ -56,9 +50,12 @@ export class Conversation extends EventTarget {
     this.bargeIn = false;
     this._listenThroughReplies = false;
     this._ttsTurn = false; // between tts start and its stop/abort: TTS owns the mouth
-    // Wake greeting: fetched from a link and played through the reply player
-    this._greetingStop = null; // ends the greeting that is playing
+    // Wake greeting: the server streams it like a reply (tts start ... stop)
     this._greetingWaiter = null; // resolves the wake activation's wait for its greeting
+    this._connecting = null; // the connect() under way; callers share it
+    this._activations = 0; // wake activations under way (connecting, greeting)
+    this._listenGen = 0; // bumped by stopListening(): a startListening() still starting gives up
+    this._pingTimer = null;
     this._sttText = "";
     this._ttsText = "";
     this._connectionState = {
@@ -175,16 +172,40 @@ export class Conversation extends EventTarget {
     this._initialized = true;
   }
 
+  /** No conversation: not listening, not speaking, not starting one from the wake word. */
+  get idle() {
+    return !this._autoSessionActive && !this._sendingFrames && this._activations === 0 &&
+      this.state.device === DeviceState.IDLE;
+  }
+
   async connect() {
     if (!this._initialized) await this.init();
     if (this.protocol && this.protocol.isOpen()) return true;
+    // One attempt at a time: the wake word, the ready keeper and the panels all connect
+    if (!this._connecting) {
+      this._connecting = this._connect().finally(() => { this._connecting = null; });
+    }
+    return this._connecting;
+  }
+
+  async _connect() {
     this._connectionState.connectInFlight = true;
     this._emitLog("info", "connecting session");
     this.dispatchEvent(new CustomEvent("xz-status", {
       detail: { phase: "connecting", message: "Connecting to the server..." }
     }));
-    this.protocol = new WsProtocol({ url: this.wsUrl, token: this.wsToken, identity: this.identity });
-    this.protocol.addEventListener("open", () => {
+    // The ready keeper reconnects (with backoff); a link the protocol brought
+    // back on its own would run next to the one connect() opens
+    if (this.protocol) {
+      this.protocol.stopReconnecting();
+      await this.protocol.close();
+    }
+    const protocol = new WsProtocol({ url: this.wsUrl, token: this.wsToken, identity: this.identity });
+    protocol.stopReconnecting();
+    this.protocol = protocol;
+    const current = (fn) => (e) => { if (this.protocol === protocol) fn(e); };
+    this.protocol.addEventListener("open", current(() => {
+      this._startIdlePing();
       this._emitLog("info", "session open");
       this._connectionState.isConnected = true;
       this._connectionState.connectInFlight = false;
@@ -198,8 +219,9 @@ export class Conversation extends EventTarget {
       this.dispatchEvent(new CustomEvent("xz-status", {
         detail: { phase: "connected", message: "Connected" }
       }));
-    });
-    this.protocol.addEventListener("close", (event) => {
+    }));
+    this.protocol.addEventListener("close", current((event) => {
+      this._stopIdlePing();
       const conversationWasActive = this._autoSessionActive || this._sendingFrames;
       this._connectionState.connectInFlight = false;
       this._connectionState.isConnected = false;
@@ -214,22 +236,21 @@ export class Conversation extends EventTarget {
       this.state.setConnected(false, "close");
       this.dispatchEvent(new CustomEvent("disconnected"));
       if (conversationWasActive) {
-        this.protocol?.stopReconnecting?.();
         this._recoverFromRemoteDisconnect(detailReason).catch((error) => {
           this._emitLog("error", "disconnect recovery failed", { error: String(error) });
         });
       }
-    });
-    this.protocol.addEventListener("reconnecting", (e) => {
+    }));
+    this.protocol.addEventListener("reconnecting", current((e) => {
       this._connectionState.reconnectAttempts = Math.max(this._connectionState.reconnectAttempts, Number(e?.detail?.attempt) || 0);
       this._connectionState.lastReconnectScheduledAt = this._markNow("lastReconnectScheduledAt");
       this._connectionState.lastReconnectAttemptAt = this._markNow("lastReconnectAttemptAt");
       this._emitLog("info", `session reconnecting #${e.detail.attempt}`, { delay: e.detail.delay });
       this.dispatchEvent(new CustomEvent("reconnecting", { detail: e.detail }));
-    });
-    this.protocol.addEventListener("json", (e) => this._onJson(e.detail));
-    this.protocol.addEventListener("audio", (e) => this._onAudio(e.detail));
-    const ok = await this.protocol.connect();
+    }));
+    this.protocol.addEventListener("json", current((e) => this._onJson(e.detail)));
+    this.protocol.addEventListener("audio", current((e) => this._onAudio(e.detail)));
+    const ok = await protocol.connect();
     this._connectionState.connectInFlight = false;
     if (!ok) {
       this._connectionState.isConnected = false;
@@ -244,14 +265,31 @@ export class Conversation extends EventTarget {
   }
 
   async disconnect() {
-    if (this.protocol) await this.protocol.close();
+    this._stopIdlePing();
+    const protocol = this.protocol;
     this.protocol = null;
+    if (protocol) await protocol.close();
     this._connectionState.isConnected = false;
     this._connectionState.connectInFlight = false;
     this._connectionState.lastDisconnectedAt = this._markNow("lastDisconnectedAt");
     this._connectionState.lastDisconnectReason = "user";
     this.state.setConnected(false, "user");
     this._emitLog("info", "manual disconnect");
+  }
+
+  // The server closes a link with no activity (close_connection_no_voice_time
+  // + 60 s). Between conversations a ping keeps it open; never during one, or
+  // the server's no-voice timeout could not end it.
+  _startIdlePing() {
+    this._stopIdlePing();
+    this._pingTimer = setInterval(() => {
+      if (this.idle && this.protocol?.isOpen()) this.protocol.sendPing();
+    }, IDLE_PING_MS);
+  }
+
+  _stopIdlePing() {
+    clearInterval(this._pingTimer);
+    this._pingTimer = null;
   }
 
   async endSession({ disconnect = true } = {}) {
@@ -326,6 +364,7 @@ export class Conversation extends EventTarget {
     }));
     this.dispatchEvent(new CustomEvent("wake", { detail: { ...event, word } }));
 
+    this._activations++;
     try {
       const preparation = typeof beforeListen === "function"
         ? Promise.resolve(beforeListen(event))
@@ -364,6 +403,8 @@ export class Conversation extends EventTarget {
     } catch (err) {
       this._emitLog("error", "wake trigger failed", { error: String(err) });
       return false;
+    } finally {
+      this._activations--;
     }
   }
 
@@ -388,9 +429,14 @@ export class Conversation extends EventTarget {
 
   async startListening(mode) {
     console.log("[audio] startListening mode=" + mode);
+    // A stopListening() (session ended, link closed) while this one is still
+    // starting wins: the late start must not reopen the microphone
+    const gen = this._listenGen;
+    const superseded = () => gen !== this._listenGen;
     if (!this.protocol || !this.protocol.isOpen()) {
       const ok = await this.connect();
       if (!ok) { console.warn("[audio] startListening: connect failed"); return false; }
+      if (superseded()) return false;
     }
     this._emitLog("info", `start listening`, { mode });
     try {
@@ -400,11 +446,17 @@ export class Conversation extends EventTarget {
       console.error("[audio] encoder init failed:", e);
       return false;
     }
+    if (superseded()) return false;
     try {
       await this.capture.start("conversation");
       console.log("[audio] capture ready, ctx rate=" + (this.capture._ctx && this.capture._ctx.sampleRate));
     } catch (e) {
       console.error("[audio] capture start failed:", e);
+      return false;
+    }
+    if (superseded() || !this.protocol?.isOpen()) {
+      this._emitLog("info", "listening cancelled while starting");
+      if (!this._sendingFrames) await this.capture.stop("conversation");
       return false;
     }
     this.vad.reset();
@@ -429,6 +481,7 @@ export class Conversation extends EventTarget {
   async stopListening() {
     console.log("[audio] stopListening, frames=" + this._dbgFrames + " packets=" + this._dbgPackets + " sent=" + this._dbgSent);
     this._emitLog("info", "stop listening");
+    this._listenGen++;
     this._sendingFrames = false;
     this._listenThroughReplies = false;
     if (this.encoder) await this.encoder.flush();
@@ -512,7 +565,6 @@ export class Conversation extends EventTarget {
     this._emitLog("warn", "abort", { reason });
     this.protocol.sendAbort(reason);
     if (this.player) this.player.clear();
-    if (this._greetingStop) this._greetingStop();
     this._endTtsMouth();
     this.state.setAborted(true);
     if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
@@ -534,61 +586,10 @@ export class Conversation extends EventTarget {
     if (resolve) resolve();
   }
 
-  // The clip plays through the reply player, the same path as reply audio (an
-  // <audio> element through a second AudioContext stayed silent on the Blimp)
-  async _playGreeting(msg) {
-    const url = new URL(msg.path, httpOrigin(this.wsUrl, msg.http_port)).toString();
-    if (this._greetingStop) {
-      this._greetingStop();
-      if (this.player) this.player.clear();
-    }
-    let stopped = false;
-    let endWait = null;
-    const stop = () => { stopped = true; if (endWait) endWait(); };
-    this._greetingStop = stop;
-    if (typeof msg.text === "string") {
-      this._ttsText = msg.text;
-      this.dispatchEvent(new CustomEvent("tts-text", { detail: msg.text }));
-    }
-    let playing = false;
-    try {
-      // The link never expires, so the browser cache can keep the clip
-      const res = await fetch(url, { cache: "force-cache" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const pcm = decodeWav(await res.arrayBuffer(), APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE);
-      if (stopped || !this.player) return;
-      this.state.setDevice(DeviceState.SPEAKING);
-      this._beginTtsMouth();
-      playing = true;
-      // The player has no end event: wait out the clip (plus its output buffer).
-      // Measured before push(), which transfers (empties) the buffer.
-      const ms = pcm.length / APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE * 1000 + 150;
-      await this.player.resume();
-      this.player.push(pcm);
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, ms);
-        endWait = () => { clearTimeout(timer); resolve(); };
-        if (stopped) endWait();
-      });
-    } catch (err) {
-      this._emitLog("warn", "wake greeting failed", { url, error: String(err?.message || err) });
-    } finally {
-      if (this._greetingStop === stop) {
-        this._greetingStop = null;
-        if (playing) this._endTtsMouth();
-      }
-      this._resolveGreetingWait();
-    }
-  }
-
   _onJson(msg) {
     const type = msg.type;
     console.log("[ws<-] json type=" + type, msg);
-    if (type === "wake_greeting" && typeof msg.path === "string") {
-      this._playGreeting(msg);
-    } else if (type === "tts") {
-      // The answer to the wake's own abort is not the server answering the wake
-      if (!msg.interrupted) this._resolveGreetingWait();
+    if (type === "tts") {
       const st = msg.state;
       if (st === "start") {
         // In AUTO mode, server-initiated TTS means stop capturing (unless the
@@ -602,14 +603,26 @@ export class Conversation extends EventTarget {
         if (this.player) this.player.resume();
       } else if (st === "stop") {
         this._endTtsMouth();
-        if (this._listenThroughReplies && this._sendingFrames) {
+        if (this._greetingWaiter && !msg.interrupted) {
+          // The server has answered the wake (greeting, or nothing). The wake
+          // activation starts listening once the greeting has played out, so the
+          // microphone doesn't hear it. (An interrupted stop answers the wake's
+          // own abort, not the wake.)
+          this.state.setDevice(DeviceState.IDLE);
+          const waiter = this._greetingWaiter;
+          (this.player ? this.player.drained() : Promise.resolve()).then(() => {
+            if (this._greetingWaiter === waiter) this._resolveGreetingWait();
+          });
+        } else if (this._listenThroughReplies && this._sendingFrames) {
           // Still listening. A normal stop can arrive while the last ~100 ms
           // still play, so only an interrupt drops the buffered reply audio.
           // No new listen start: it would reset the server's audio mid-sentence.
           if (msg.interrupted && this.player) this.player.clear();
           this.state.setDevice(DeviceState.LISTENING);
-        } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
-          // After TTS in auto mode, resume listening for the next turn.
+        } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive &&
+                   this._activations === 0) {
+          // After TTS in auto mode, resume listening for the next turn. (A wake
+          // activation under way starts listening itself.)
           this.state.setDevice(DeviceState.IDLE);
           this.startListening(ListeningMode.AUTO_STOP).catch((e) =>
             console.warn("[audio] auto re-listen failed:", e));

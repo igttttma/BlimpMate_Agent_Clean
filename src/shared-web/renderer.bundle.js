@@ -33453,8 +33453,7 @@ void main(void)\r
       const hello = {
         type: ClientMsg.HELLO,
         version: 1,
-        // greeting_url: the wake greeting comes as a link to play, not as reply audio
-        features: { mcp: true, greeting_url: true },
+        features: { mcp: true },
         transport: "websocket",
         audio_params: {
           format: "opus",
@@ -33515,6 +33514,11 @@ void main(void)\r
       const msg = { session_id: this.sessionId, type: ClientMsg.ABORT };
       if (reason) msg.reason = reason;
       return this._sendText(msg);
+    }
+    // Counts as activity on the server (enable_websocket_ping), which otherwise
+    // closes a link with nothing going on
+    sendPing() {
+      return this._sendText({ type: "ping" });
     }
     sendMcp(payload) {
       return this._sendText({ session_id: this.sessionId, type: ClientMsg.MCP, payload });
@@ -33965,6 +33969,8 @@ void main(void)\r
       this._node = null;
       this._onRms = null;
       this._lastRms = 0;
+      this._queued = 0;
+      this._drainWaiters = [];
     }
     onRms(cb) {
       this._onRms = cb;
@@ -33983,7 +33989,9 @@ void main(void)\r
         const m2 = e2.data;
         if (m2 && m2.type === "rms") {
           this._lastRms = m2.value;
+          this._queued = m2.queued || 0;
           if (this._onRms) this._onRms(m2.value);
+          for (const waiter of this._drainWaiters.slice()) waiter(this._queued);
         }
       };
       this._node.connect(this._ctx.destination);
@@ -33994,6 +34002,24 @@ void main(void)\r
     }
     clear() {
       if (this._node) this._node.port.postMessage({ type: "clear" });
+    }
+    /** Resolves once everything pushed so far has played (or after `timeoutMs`). */
+    drained(timeoutMs = 5e3) {
+      if (!this._node) return Promise.resolve();
+      return new Promise((resolve2) => {
+        let empty = 0;
+        const finish = () => {
+          clearTimeout(timer);
+          this._drainWaiters = this._drainWaiters.filter((w2) => w2 !== waiter);
+          resolve2();
+        };
+        const waiter = (queued) => {
+          empty = queued === 0 ? empty + 1 : 0;
+          if (empty >= 2) finish();
+        };
+        const timer = setTimeout(finish, timeoutMs);
+        this._drainWaiters.push(waiter);
+      });
     }
     async resume() {
       if (this._ctx && this._ctx.state === "suspended") await this._ctx.resume();
@@ -34013,65 +34039,6 @@ void main(void)\r
       }
     }
   };
-
-  // src/xiaozhi/audio/wav.mjs
-  function decodeWav(arrayBuffer, targetRate) {
-    const view = new DataView(arrayBuffer);
-    const tag = (at) => String.fromCharCode(
-      view.getUint8(at),
-      view.getUint8(at + 1),
-      view.getUint8(at + 2),
-      view.getUint8(at + 3)
-    );
-    if (view.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("not a WAV file");
-    let fmt = null;
-    let data = null;
-    for (let at = 12; at + 8 <= view.byteLength; ) {
-      const id = tag(at);
-      const size = view.getUint32(at + 4, true);
-      const body = at + 8;
-      if (id === "fmt ") {
-        fmt = {
-          format: view.getUint16(body, true),
-          channels: view.getUint16(body + 2, true),
-          rate: view.getUint32(body + 4, true),
-          bits: view.getUint16(body + 14, true)
-        };
-      } else if (id === "data") {
-        data = { offset: body, size: Math.min(size, view.byteLength - body) };
-        break;
-      }
-      at = body + size + (size & 1);
-    }
-    if (!fmt || !data) throw new Error("WAV without fmt or data chunk");
-    const pcm16 = fmt.format === 1 && fmt.bits === 16;
-    const float32 = fmt.format === 3 && fmt.bits === 32;
-    if (!pcm16 && !float32) throw new Error(`unsupported WAV format ${fmt.format}/${fmt.bits}-bit`);
-    const bytes = fmt.bits / 8;
-    const frames = Math.floor(data.size / (bytes * fmt.channels));
-    const mono = new Float32Array(frames);
-    for (let i2 = 0; i2 < frames; i2++) {
-      let sum = 0;
-      for (let c2 = 0; c2 < fmt.channels; c2++) {
-        const at = data.offset + (i2 * fmt.channels + c2) * bytes;
-        sum += pcm16 ? view.getInt16(at, true) / 32768 : view.getFloat32(at, true);
-      }
-      mono[i2] = sum / fmt.channels;
-    }
-    return resample(mono, fmt.rate, targetRate);
-  }
-  function resample(samples, fromRate, toRate) {
-    if (!toRate || fromRate === toRate) return samples;
-    const out = new Float32Array(Math.floor(samples.length * toRate / fromRate));
-    const step = fromRate / toRate;
-    for (let i2 = 0; i2 < out.length; i2++) {
-      const pos = i2 * step;
-      const base = Math.floor(pos);
-      const next = Math.min(base + 1, samples.length - 1);
-      out[i2] = samples[base] + (samples[next] - samples[base]) * (pos - base);
-    }
-    return out;
-  }
 
   // src/xiaozhi/audio/vad.mjs
   var SilenceVad = class {
@@ -34531,12 +34498,7 @@ void main(void)\r
   }
 
   // src/xiaozhi/conversation/conversation.mjs
-  function httpOrigin(wsUrl, httpPort) {
-    const url2 = new URL(wsUrl);
-    url2.protocol = url2.protocol === "wss:" ? "https:" : "http:";
-    if (httpPort) url2.port = String(httpPort);
-    return url2.origin;
-  }
+  var IDLE_PING_MS = 6e4;
   var Conversation = class extends EventTarget {
     constructor({ bridge, identity, wsUrl, wsToken, assetUrls: assetUrls2 }) {
       super();
@@ -34556,7 +34518,8 @@ void main(void)\r
         });
       });
       registerAllTools(this.mcp, bridge, {
-        endSession: () => this.endSession()
+        // The AI ends the conversation; the link stays for the next one
+        endSession: () => this.endSession({ disconnect: false })
       });
       this.protocol = null;
       this.encoder = null;
@@ -34570,8 +34533,11 @@ void main(void)\r
       this.bargeIn = false;
       this._listenThroughReplies = false;
       this._ttsTurn = false;
-      this._greetingStop = null;
       this._greetingWaiter = null;
+      this._connecting = null;
+      this._activations = 0;
+      this._listenGen = 0;
+      this._pingTimer = null;
       this._sttText = "";
       this._ttsText = "";
       this._connectionState = {
@@ -34672,16 +34638,38 @@ void main(void)\r
       });
       this._initialized = true;
     }
+    /** No conversation: not listening, not speaking, not starting one from the wake word. */
+    get idle() {
+      return !this._autoSessionActive && !this._sendingFrames && this._activations === 0 && this.state.device === DeviceState.IDLE;
+    }
     async connect() {
       if (!this._initialized) await this.init();
       if (this.protocol && this.protocol.isOpen()) return true;
+      if (!this._connecting) {
+        this._connecting = this._connect().finally(() => {
+          this._connecting = null;
+        });
+      }
+      return this._connecting;
+    }
+    async _connect() {
       this._connectionState.connectInFlight = true;
       this._emitLog("info", "connecting session");
       this.dispatchEvent(new CustomEvent("xz-status", {
         detail: { phase: "connecting", message: "Connecting to the server..." }
       }));
-      this.protocol = new WsProtocol({ url: this.wsUrl, token: this.wsToken, identity: this.identity });
-      this.protocol.addEventListener("open", () => {
+      if (this.protocol) {
+        this.protocol.stopReconnecting();
+        await this.protocol.close();
+      }
+      const protocol = new WsProtocol({ url: this.wsUrl, token: this.wsToken, identity: this.identity });
+      protocol.stopReconnecting();
+      this.protocol = protocol;
+      const current = (fn) => (e2) => {
+        if (this.protocol === protocol) fn(e2);
+      };
+      this.protocol.addEventListener("open", current(() => {
+        this._startIdlePing();
         this._emitLog("info", "session open");
         this._connectionState.isConnected = true;
         this._connectionState.connectInFlight = false;
@@ -34695,8 +34683,9 @@ void main(void)\r
         this.dispatchEvent(new CustomEvent("xz-status", {
           detail: { phase: "connected", message: "Connected" }
         }));
-      });
-      this.protocol.addEventListener("close", (event) => {
+      }));
+      this.protocol.addEventListener("close", current((event) => {
+        this._stopIdlePing();
         const conversationWasActive = this._autoSessionActive || this._sendingFrames;
         this._connectionState.connectInFlight = false;
         this._connectionState.isConnected = false;
@@ -34711,22 +34700,21 @@ void main(void)\r
         this.state.setConnected(false, "close");
         this.dispatchEvent(new CustomEvent("disconnected"));
         if (conversationWasActive) {
-          this.protocol?.stopReconnecting?.();
           this._recoverFromRemoteDisconnect(detailReason).catch((error) => {
             this._emitLog("error", "disconnect recovery failed", { error: String(error) });
           });
         }
-      });
-      this.protocol.addEventListener("reconnecting", (e2) => {
+      }));
+      this.protocol.addEventListener("reconnecting", current((e2) => {
         this._connectionState.reconnectAttempts = Math.max(this._connectionState.reconnectAttempts, Number(e2?.detail?.attempt) || 0);
         this._connectionState.lastReconnectScheduledAt = this._markNow("lastReconnectScheduledAt");
         this._connectionState.lastReconnectAttemptAt = this._markNow("lastReconnectAttemptAt");
         this._emitLog("info", `session reconnecting #${e2.detail.attempt}`, { delay: e2.detail.delay });
         this.dispatchEvent(new CustomEvent("reconnecting", { detail: e2.detail }));
-      });
-      this.protocol.addEventListener("json", (e2) => this._onJson(e2.detail));
-      this.protocol.addEventListener("audio", (e2) => this._onAudio(e2.detail));
-      const ok = await this.protocol.connect();
+      }));
+      this.protocol.addEventListener("json", current((e2) => this._onJson(e2.detail)));
+      this.protocol.addEventListener("audio", current((e2) => this._onAudio(e2.detail)));
+      const ok = await protocol.connect();
       this._connectionState.connectInFlight = false;
       if (!ok) {
         this._connectionState.isConnected = false;
@@ -34740,14 +34728,29 @@ void main(void)\r
       return ok;
     }
     async disconnect() {
-      if (this.protocol) await this.protocol.close();
+      this._stopIdlePing();
+      const protocol = this.protocol;
       this.protocol = null;
+      if (protocol) await protocol.close();
       this._connectionState.isConnected = false;
       this._connectionState.connectInFlight = false;
       this._connectionState.lastDisconnectedAt = this._markNow("lastDisconnectedAt");
       this._connectionState.lastDisconnectReason = "user";
       this.state.setConnected(false, "user");
       this._emitLog("info", "manual disconnect");
+    }
+    // The server closes a link with no activity (close_connection_no_voice_time
+    // + 60 s). Between conversations a ping keeps it open; never during one, or
+    // the server's no-voice timeout could not end it.
+    _startIdlePing() {
+      this._stopIdlePing();
+      this._pingTimer = setInterval(() => {
+        if (this.idle && this.protocol?.isOpen()) this.protocol.sendPing();
+      }, IDLE_PING_MS);
+    }
+    _stopIdlePing() {
+      clearInterval(this._pingTimer);
+      this._pingTimer = null;
     }
     async endSession({ disconnect = true } = {}) {
       this._autoSessionActive = false;
@@ -34815,6 +34818,7 @@ void main(void)\r
         detail: { phase: "wake-triggered", message: "Waking...", word }
       }));
       this.dispatchEvent(new CustomEvent("wake", { detail: { ...event, word } }));
+      this._activations++;
       try {
         const preparation = typeof beforeListen === "function" ? Promise.resolve(beforeListen(event)) : Promise.resolve();
         if (this.protocol?.isOpen?.()) {
@@ -34846,6 +34850,8 @@ void main(void)\r
       } catch (err) {
         this._emitLog("error", "wake trigger failed", { error: String(err) });
         return false;
+      } finally {
+        this._activations--;
       }
     }
     detachWakeClient() {
@@ -34873,12 +34879,15 @@ void main(void)\r
     }
     async startListening(mode) {
       console.log("[audio] startListening mode=" + mode);
+      const gen = this._listenGen;
+      const superseded = () => gen !== this._listenGen;
       if (!this.protocol || !this.protocol.isOpen()) {
         const ok = await this.connect();
         if (!ok) {
           console.warn("[audio] startListening: connect failed");
           return false;
         }
+        if (superseded()) return false;
       }
       this._emitLog("info", `start listening`, { mode });
       try {
@@ -34888,11 +34897,17 @@ void main(void)\r
         console.error("[audio] encoder init failed:", e2);
         return false;
       }
+      if (superseded()) return false;
       try {
         await this.capture.start("conversation");
         console.log("[audio] capture ready, ctx rate=" + (this.capture._ctx && this.capture._ctx.sampleRate));
       } catch (e2) {
         console.error("[audio] capture start failed:", e2);
+        return false;
+      }
+      if (superseded() || !this.protocol?.isOpen()) {
+        this._emitLog("info", "listening cancelled while starting");
+        if (!this._sendingFrames) await this.capture.stop("conversation");
         return false;
       }
       this.vad.reset();
@@ -34912,6 +34927,7 @@ void main(void)\r
     async stopListening() {
       console.log("[audio] stopListening, frames=" + this._dbgFrames + " packets=" + this._dbgPackets + " sent=" + this._dbgSent);
       this._emitLog("info", "stop listening");
+      this._listenGen++;
       this._sendingFrames = false;
       this._listenThroughReplies = false;
       if (this.encoder) await this.encoder.flush();
@@ -34991,7 +35007,6 @@ void main(void)\r
       this._emitLog("warn", "abort", { reason });
       this.protocol.sendAbort(reason);
       if (this.player) this.player.clear();
-      if (this._greetingStop) this._greetingStop();
       this._endTtsMouth();
       this.state.setAborted(true);
       if (this.state.device !== DeviceState.IDLE) this.state.setDevice(DeviceState.IDLE);
@@ -35013,62 +35028,10 @@ void main(void)\r
       this._greetingWaiter = null;
       if (resolve2) resolve2();
     }
-    // The clip plays through the reply player, the same path as reply audio (an
-    // <audio> element through a second AudioContext stayed silent on the Blimp)
-    async _playGreeting(msg) {
-      const url2 = new URL(msg.path, httpOrigin(this.wsUrl, msg.http_port)).toString();
-      if (this._greetingStop) {
-        this._greetingStop();
-        if (this.player) this.player.clear();
-      }
-      let stopped = false;
-      let endWait = null;
-      const stop = () => {
-        stopped = true;
-        if (endWait) endWait();
-      };
-      this._greetingStop = stop;
-      if (typeof msg.text === "string") {
-        this._ttsText = msg.text;
-        this.dispatchEvent(new CustomEvent("tts-text", { detail: msg.text }));
-      }
-      let playing = false;
-      try {
-        const res = await fetch(url2, { cache: "force-cache" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const pcm = decodeWav(await res.arrayBuffer(), APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE);
-        if (stopped || !this.player) return;
-        this.state.setDevice(DeviceState.SPEAKING);
-        this._beginTtsMouth();
-        playing = true;
-        const ms = pcm.length / APP_CONFIG.AUDIO.OUTPUT_SAMPLE_RATE * 1e3 + 150;
-        await this.player.resume();
-        this.player.push(pcm);
-        await new Promise((resolve2) => {
-          const timer = setTimeout(resolve2, ms);
-          endWait = () => {
-            clearTimeout(timer);
-            resolve2();
-          };
-          if (stopped) endWait();
-        });
-      } catch (err) {
-        this._emitLog("warn", "wake greeting failed", { url: url2, error: String(err?.message || err) });
-      } finally {
-        if (this._greetingStop === stop) {
-          this._greetingStop = null;
-          if (playing) this._endTtsMouth();
-        }
-        this._resolveGreetingWait();
-      }
-    }
     _onJson(msg) {
       const type = msg.type;
       console.log("[ws<-] json type=" + type, msg);
-      if (type === "wake_greeting" && typeof msg.path === "string") {
-        this._playGreeting(msg);
-      } else if (type === "tts") {
-        if (!msg.interrupted) this._resolveGreetingWait();
+      if (type === "tts") {
         const st = msg.state;
         if (st === "start") {
           if (this.state.mode === ListeningMode.AUTO_STOP && this.state.device === DeviceState.LISTENING && !this._listenThroughReplies) {
@@ -35080,10 +35043,16 @@ void main(void)\r
           if (this.player) this.player.resume();
         } else if (st === "stop") {
           this._endTtsMouth();
-          if (this._listenThroughReplies && this._sendingFrames) {
+          if (this._greetingWaiter && !msg.interrupted) {
+            this.state.setDevice(DeviceState.IDLE);
+            const waiter = this._greetingWaiter;
+            (this.player ? this.player.drained() : Promise.resolve()).then(() => {
+              if (this._greetingWaiter === waiter) this._resolveGreetingWait();
+            });
+          } else if (this._listenThroughReplies && this._sendingFrames) {
             if (msg.interrupted && this.player) this.player.clear();
             this.state.setDevice(DeviceState.LISTENING);
-          } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive) {
+          } else if (this.state.mode === ListeningMode.AUTO_STOP && this._autoSessionActive && this._activations === 0) {
             this.state.setDevice(DeviceState.IDLE);
             this.startListening(ListeningMode.AUTO_STOP).catch((e2) => console.warn("[audio] auto re-listen failed:", e2));
           } else {
@@ -35987,6 +35956,7 @@ void main(void)\r
       this.running = false;
       this.stopping = false;
       this.reconnectTimer = null;
+      this.keywords = "wake";
       this.lastStatus = { running: false, mode: "stopped", transport: "web-audio" };
     }
     onWake(handler) {
@@ -35997,8 +35967,17 @@ void main(void)\r
       if (typeof handler === "function") this.statusHandlers.add(handler);
       return () => this.statusHandlers.delete(handler);
     }
+    /** Listen for "Hey Blimp" (the wake word). */
     async start() {
-      if (this.running && this.socket?.readyState === WebSocket.OPEN) return this.lastStatus;
+      return this.startKeywords("wake");
+    }
+    /** Listen for a keyword set: "wake" (Hey Blimp) or "answer" (incoming calls). */
+    async startKeywords(set) {
+      this.keywords = set === "answer" ? "answer" : "wake";
+      if (this.running && this.socket?.readyState === WebSocket.OPEN) {
+        this._sendKeywords();
+        return this.lastStatus;
+      }
       this.stopping = false;
       await this.audioCapture.start("wake-word");
       if (!this.unsubscribeAudio) {
@@ -36047,6 +36026,7 @@ void main(void)\r
             for (const handler of this.handlers) handler(payload);
             return;
           }
+          if (payload.type === "hello") this._sendKeywords();
           if (payload.type === "hello" || payload.type === "status") {
             this._setStatus({ ...payload, running: payload.running !== false, transport: "web-audio" });
             if (!settled) {
@@ -36077,6 +36057,14 @@ void main(void)\r
           }
         };
       });
+    }
+    // The service keeps one keyword set for everyone: say ours on every (re)connect
+    _sendKeywords() {
+      if (this.socket?.readyState !== WebSocket.OPEN) return;
+      try {
+        this.socket.send(JSON.stringify({ type: "keywords", set: this.keywords }));
+      } catch {
+      }
     }
     _sendFrame(frame) {
       if (!this.running || this.socket?.readyState !== WebSocket.OPEN) return;
@@ -36118,6 +36106,10 @@ void main(void)\r
       if (this.unsubscribe) this.unsubscribe();
       this.unsubscribe = null;
       return this.bridge.stop();
+    }
+    /** What the detector is doing now ({ running, message, ... }). */
+    getStatus() {
+      return this.bridge.getStatus?.() || null;
     }
   };
   function createWakeProvider({ hostServiceUrl, audioCapture, nativeBridge } = {}) {
@@ -36169,6 +36161,112 @@ void main(void)\r
       const status = await this.provider.stop?.();
       this.dispatchEvent(new CustomEvent("status", { detail: status || { running: false } }));
       return status;
+    }
+  };
+
+  // src/xiaozhi/conversation/ready-keeper.mjs
+  var CHECK_MS = 5e3;
+  var RETRY_MIN_MS = 2e3;
+  var RETRY_MAX_MS = 3e4;
+  var ReadyKeeper = class {
+    /**
+     * @param {object} deps
+     * @param {object} deps.conversation  xiaozhi Conversation (idle, connect())
+     * @param {() => object|null} deps.getWakeCoordinator  null: no wake word to keep
+     * @param {() => boolean} [deps.isBusy]  a video call holds the mic
+     * @param {(level, message, detail?) => void} [deps.log]
+     */
+    constructor({ conversation, getWakeCoordinator, isBusy = () => false, log = () => {
+    } }) {
+      this.conversation = conversation;
+      this.getWakeCoordinator = getWakeCoordinator;
+      this.isBusy = isBusy;
+      this.log = log;
+      this._timer = null;
+      this._scheduled = false;
+      this._checking = false;
+      this._retryMs = RETRY_MIN_MS;
+      this._nextConnectAt = 0;
+      this._failing = false;
+    }
+    start() {
+      if (this._timer) return;
+      const conv = this.conversation;
+      const check = () => this.check();
+      conv.addEventListener("session-ended", check);
+      conv.addEventListener("disconnected", check);
+      conv.state.addEventListener("device", check);
+      const now = () => {
+        this._nextConnectAt = 0;
+        this._retryMs = RETRY_MIN_MS;
+        this.check();
+      };
+      globalThis.document?.addEventListener?.("visibilitychange", () => {
+        if (document.visibilityState === "visible") now();
+      });
+      globalThis.addEventListener?.("online", now);
+      this._timer = setInterval(check, CHECK_MS);
+      this.check();
+    }
+    /** Check soon; calls in a burst make one check. */
+    check() {
+      if (this._scheduled) return;
+      this._scheduled = true;
+      setTimeout(() => {
+        this._scheduled = false;
+        this._run();
+      }, 0);
+    }
+    _free() {
+      return !this.isBusy() && this.conversation.idle;
+    }
+    async _run() {
+      if (this._checking) return;
+      this._checking = true;
+      try {
+        if (!this._free()) return;
+        await this._keepConnected();
+        if (!this._free()) return;
+        await this._keepWakeWord();
+      } catch (err) {
+        this.log("warn", "Ready check failed", { error: String(err?.message || err) });
+      } finally {
+        this._checking = false;
+      }
+    }
+    async _keepConnected() {
+      const conv = this.conversation;
+      if (conv.protocol?.isOpen?.()) {
+        this._retryMs = RETRY_MIN_MS;
+        return;
+      }
+      if (Date.now() < this._nextConnectAt) return;
+      const ok = await conv.connect();
+      if (ok) {
+        if (this._failing) this.log("info", "Server connection is back");
+        this._failing = false;
+        this._retryMs = RETRY_MIN_MS;
+        this._nextConnectAt = 0;
+        return;
+      }
+      this._failing = true;
+      this._nextConnectAt = Date.now() + this._retryMs;
+      this.log("warn", `Server unreachable; retrying in ${Math.round(this._retryMs / 1e3)} s`);
+      this._retryMs = Math.min(this._retryMs * 2, RETRY_MAX_MS);
+    }
+    async _keepWakeWord() {
+      const wake = this.getWakeCoordinator();
+      if (!wake) return;
+      if (!wake.running) {
+        this.log("info", "Wake word re-armed (it was off)");
+        await wake.start();
+        return;
+      }
+      const status = wake.provider.getStatus?.();
+      if (status && status.running === false && (status.message || "stopped") === "stopped") {
+        this.log("info", "Wake word re-armed", { was: status.message || "stopped" });
+        await wake.provider.start();
+      }
     }
   };
 
@@ -36887,30 +36985,24 @@ void main(void)\r
       } catch {
       }
     }
-    /** Listen for a keyword set ("answer" or "wake") on the wake-word engine. */
+    /**
+     * Listen for a keyword set ("answer" or "wake") on the wake-word engine: the
+     * Android bridge, or the desktop service's provider (the same models).
+     */
     _listenFor(set, onHit) {
       this._stopListening();
-      const native = this.nativeWake;
-      let off;
-      if (typeof native?.startKeywords === "function") {
-        off = native.onWake((e2) => {
-          if ((e2?.keywords || "wake") === set) onHit(e2);
+      const engine = typeof this.nativeWake?.startKeywords === "function" ? this.nativeWake : this.wakeProvider;
+      if (typeof engine?.startKeywords !== "function") return;
+      const off = engine.onWake((e2) => {
+        if ((e2?.keywords || "wake") === set) onHit(e2);
+      });
+      Promise.resolve(engine.startKeywords(set)).catch(() => {
+      });
+      this._stopKeywords = () => {
+        off();
+        Promise.resolve(engine.stop?.()).catch(() => {
         });
-        native.startKeywords(set);
-        this._stopKeywords = () => {
-          off();
-          native.stop();
-        };
-      } else if (this.wakeProvider) {
-        off = this.wakeProvider.onWake(onHit);
-        this.wakeProvider.start().catch(() => {
-        });
-        this._stopKeywords = () => {
-          off();
-          this.wakeProvider.stop?.().catch?.(() => {
-          });
-        };
-      }
+      };
     }
     _stopListening() {
       const stop = this._stopKeywords;
@@ -37343,9 +37435,9 @@ void main(void)\r
         ]);
       }
       const conv = this.conversation;
-      if (conv.protocol?.isOpen?.() || conv._autoSessionActive || conv.state.device !== DeviceState.IDLE) {
+      if (!conv.idle) {
         try {
-          await conv.endSession();
+          await conv.endSession({ disconnect: false });
         } catch {
         }
       }
@@ -37656,7 +37748,7 @@ void main(void)\r
   };
 
   // src/remote-control/index.mjs
-  function httpOrigin2(wsUrl, httpPort) {
+  function httpOrigin(wsUrl, httpPort) {
     const url2 = new URL(wsUrl);
     url2.protocol = url2.protocol === "wss:" ? "https:" : "http:";
     if (httpPort) url2.port = String(httpPort);
@@ -37722,7 +37814,7 @@ void main(void)\r
       if (msg.type === "play" && typeof msg.path === "string") {
         const kind = msg.kind === "video" ? "video" : "audio";
         const cached = kind === "video" ? videos.urlFor(msg.id) : null;
-        const url2 = cached || new URL(msg.path, httpOrigin2(conversation.wsUrl, msg.http_port)).toString();
+        const url2 = cached || new URL(msg.path, httpOrigin(conversation.wsUrl, msg.http_port)).toString();
         playback.play({ kind, id: msg.id, title: msg.title || (kind === "video" ? "Video" : "Audio"), url: url2, source: cached ? "cache" : "stream" });
       } else if (msg.type === "settings") {
         const bargeIn = msg.barge_in === true;
@@ -37731,7 +37823,7 @@ void main(void)\r
         }
         conversation.bargeIn = bargeIn;
       } else if (msg.type === "videos" && Array.isArray(msg.videos)) {
-        const origin = httpOrigin2(conversation.wsUrl, msg.http_port);
+        const origin = httpOrigin(conversation.wsUrl, msg.http_port);
         videos.sync(msg.videos.map((v2) => ({ ...v2, url: new URL(v2.path, origin).toString() })));
       } else if (msg.type === "stop_audio") {
         playback.stop("stopped from the portal");
@@ -38752,7 +38844,20 @@ void main(void)\r
           detail: { source: "remote-control", ...detail }
         })
       });
-      conv.connect().catch((err) => console.error("[xz] ws connect failed:", err));
+      const wakeEnabled = globalThis.hostInfo?.wakeWord?.enabled !== false;
+      window.__xz.readyKeeper = new ReadyKeeper({
+        conversation: conv,
+        getWakeCoordinator: () => wakeEnabled ? window.__xz.wakeCoordinator || null : null,
+        isBusy: () => callController.busy,
+        log: (level, message, detail = {}) => chatPanel.addLog({
+          ts: (/* @__PURE__ */ new Date()).toISOString(),
+          level,
+          message,
+          detail: { source: "ready", ...detail }
+        })
+      });
+      callController.addEventListener("status", () => window.__xz.readyKeeper.check());
+      window.__xz.readyKeeper.start();
     } catch (err) {
       console.error("[xz] init failed:", err);
       chatPanel.setConnected(false, "Init failed");

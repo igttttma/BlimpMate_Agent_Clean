@@ -21,6 +21,8 @@ export class WebAudioWakeProvider {
     this.running = false;
     this.stopping = false;
     this.reconnectTimer = null;
+    // Keyword set, as on Android: "wake" (Hey Blimp) or "answer" (a call ringing)
+    this.keywords = "wake";
     this.lastStatus = { running: false, mode: "stopped", transport: "web-audio" };
   }
 
@@ -34,8 +36,18 @@ export class WebAudioWakeProvider {
     return () => this.statusHandlers.delete(handler);
   }
 
+  /** Listen for "Hey Blimp" (the wake word). */
   async start() {
-    if (this.running && this.socket?.readyState === WebSocket.OPEN) return this.lastStatus;
+    return this.startKeywords("wake");
+  }
+
+  /** Listen for a keyword set: "wake" (Hey Blimp) or "answer" (incoming calls). */
+  async startKeywords(set) {
+    this.keywords = set === "answer" ? "answer" : "wake";
+    if (this.running && this.socket?.readyState === WebSocket.OPEN) {
+      this._sendKeywords();
+      return this.lastStatus;
+    }
     this.stopping = false;
     await this.audioCapture.start("wake-word");
     if (!this.unsubscribeAudio) {
@@ -80,6 +92,7 @@ export class WebAudioWakeProvider {
           for (const handler of this.handlers) handler(payload);
           return;
         }
+        if (payload.type === "hello") this._sendKeywords();
         if (payload.type === "hello" || payload.type === "status") {
           this._setStatus({ ...payload, running: payload.running !== false, transport: "web-audio" });
           if (!settled) {
@@ -109,6 +122,14 @@ export class WebAudioWakeProvider {
         }
       };
     });
+  }
+
+  // The service keeps one keyword set for everyone: say ours on every (re)connect
+  _sendKeywords() {
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    try {
+      this.socket.send(JSON.stringify({ type: "keywords", set: this.keywords }));
+    } catch {}
   }
 
   _sendFrame(frame) {

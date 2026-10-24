@@ -20,7 +20,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 
 // Lightweight .env loader (no dependency). Shell-exported vars always win, so
 // `BM_HOST_SERVICE_PORT=5000 npm run demo` still overrides the file. Lets the
-// operator persist BM_HOST_SERVICE_PORT / BM_XIAOZHI_* / BM_SHERPA_* in a repo
+// operator persist BM_HOST_SERVICE_PORT / BM_XIAOZHI_* / BM_WAKE_MODEL_DIR in a repo
 // .env instead of exporting them on every launch. Runs before the env-reading
 // consts below, and before createWindow() so the renderer/preload inherit it.
 (function loadDotEnv() {
@@ -103,6 +103,11 @@ let captureInFlight = false;
 let lastStateBroadcast = null;
 let hostServiceProcess = null;
 let ownsHostServiceProcess = false;
+// A wake service that dies is started again (backing off), like the Android
+// detector's retry; stopOwnedHostService() (app closing) turns that off
+let hostServiceWanted = true;
+let hostServiceRestartMs = 1000;
+const HOST_SERVICE_RESTART_MAX_MS = 30000;
 
 function isLocalHostService() {
   return ["127.0.0.1", "localhost", "::1"].includes(HOST_SERVICE_HOST.toLowerCase());
@@ -137,18 +142,13 @@ async function ensureLocalHostService() {
     ? path.join(serviceRoot, ".venv", "Scripts", "python.exe")
     : path.join(serviceRoot, ".venv", "bin", "python");
   const python = configuredPython || (fs.existsSync(venvPython) ? venvPython : "python");
-  const defaultModelDir = path.join(
-    serviceRoot,
-    "data",
-    "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
-  );
-  const defaultKeywords = path.join(serviceRoot, "wake_word", "keywords.en.txt");
+  // The trained wake-word models the Android app ships too
+  const defaultModelDir = path.join(PROJECT_ROOT, "src", "wake-models");
   const env = {
     ...process.env,
     BM_HOST_SERVICE_HOST: HOST_SERVICE_HOST,
     BM_HOST_SERVICE_PORT: HOST_SERVICE_PORT,
-    BM_SHERPA_MODEL_DIR: process.env.BM_SHERPA_MODEL_DIR || defaultModelDir,
-    BM_SHERPA_KEYWORDS_FILE: process.env.BM_SHERPA_KEYWORDS_FILE || defaultKeywords,
+    BM_WAKE_MODEL_DIR: process.env.BM_WAKE_MODEL_DIR || defaultModelDir,
     PYTHONUNBUFFERED: "1"
   };
 
@@ -164,10 +164,20 @@ async function ensureLocalHostService() {
   hostServiceProcess.on("error", (error) => {
     console.error("[host-service] failed to start:", error?.message || error);
   });
+  const startedAt = Date.now();
   hostServiceProcess.on("exit", (code, signal) => {
     if (code && code !== 0) console.warn(`[host-service] exited: code=${code} signal=${signal || ""}`);
     hostServiceProcess = null;
     ownsHostServiceProcess = false;
+    if (!hostServiceWanted) return;
+    // Ran a good while: a fresh failure, not a crash loop
+    if (Date.now() - startedAt > 60000) hostServiceRestartMs = 1000;
+    const delay = hostServiceRestartMs;
+    hostServiceRestartMs = Math.min(hostServiceRestartMs * 2, HOST_SERVICE_RESTART_MAX_MS);
+    console.warn(`[host-service] restarting in ${delay} ms`);
+    setTimeout(() => {
+      if (hostServiceWanted && !hostServiceProcess) ensureLocalHostService().catch(() => {});
+    }, delay);
   });
 
   const deadline = Date.now() + 12000;
@@ -181,6 +191,7 @@ async function ensureLocalHostService() {
 }
 
 function stopOwnedHostService() {
+  hostServiceWanted = false;
   if (!ownsHostServiceProcess || !hostServiceProcess) return;
   try { hostServiceProcess.kill(); } catch {}
   hostServiceProcess = null;
@@ -1874,6 +1885,11 @@ function trackWsOwner(webContents) {
   webContents.once("destroyed", () => closeWsSessionsFor(webContents));
 }
 
+// Like OkHttp's pingInterval in the Android app: a link that died silently
+// (sleep, network change) gets no pong, is closed within two intervals, and
+// the renderer's ready keeper reconnects
+const XZ_WS_PING_MS = 20000;
+
 ipcMain.handle("xz-ws-open", (event, { id, url, headers }) => {
   if (wsSessions.has(id)) {
     try { wsSessions.get(id).ws.terminate(); } catch {}
@@ -1887,7 +1903,18 @@ ipcMain.handle("xz-ws-open", (event, { id, url, headers }) => {
   });
   wsSessions.set(id, { ws, webContents: event.sender });
 
+  let heartbeat = null;
+  let alive = true;
+  ws.on("pong", () => { alive = true; });
   ws.on("open", () => {
+    heartbeat = setInterval(() => {
+      if (!alive) {
+        try { ws.terminate(); } catch {}
+        return;
+      }
+      alive = false;
+      try { ws.ping(); } catch {}
+    }, XZ_WS_PING_MS);
     sendToRenderer(event.sender, `xz-ws-event-${id}`, { type: "open" });
   });
   ws.on("message", (data, isBinary) => {
@@ -1902,6 +1929,7 @@ ipcMain.handle("xz-ws-open", (event, { id, url, headers }) => {
     }
   });
   ws.on("close", (code, reason) => {
+    clearInterval(heartbeat);
     sendToRenderer(event.sender, `xz-ws-event-${id}`, {
       type: "close",
       code,

@@ -1,7 +1,10 @@
 # BlimpMate Wake Service
 
-Minimal local Sherpa-ONNX keyword spotting service. Microphone capture stays in
-the WebView; Python only receives 16 kHz float32 PCM over WebSocket.
+Minimal local wake-word service for the desktop app. It runs the same trained
+openWakeWord models as the Android app (`src/wake-models`: "Hey Blimp", and
+"answer" while a video call rings) with the same thresholds. Microphone capture
+stays in the renderer; Python only receives 16 kHz float32 PCM over WebSocket.
+`BM_WAKE_MODEL_DIR` points it at another model folder.
 
 ## Run
 
@@ -19,4 +22,5 @@ Electron starts this service automatically. The default endpoint is
 - `GET /wake_word/status`
 - `POST /wake_word/start`
 - `POST /wake_word/stop`
-- `WS /wake_word/audio`
+- `WS /wake_word/audio`: binary messages are audio; the text message
+  `{"type": "keywords", "set": "wake" | "answer"}` switches the keyword set

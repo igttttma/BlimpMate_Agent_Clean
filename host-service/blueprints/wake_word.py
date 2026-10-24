@@ -2,7 +2,7 @@
 
 Endpoints
 ---------
-* ``POST /wake_word/start``  - start the Sherpa engine.
+* ``POST /wake_word/start``  - start the openWakeWord engine.
 * ``POST /wake_word/stop``   - stop the engine and disconnect subscribers.
 * ``GET  /wake_word/status`` - JSON snapshot of the manager state.
 * ``GET  /wake_word/events`` - real-time wake-event stream. Speaks WebSocket
@@ -10,23 +10,23 @@ Endpoints
   Events (``text/event-stream``) so browser clients always have a way to
   receive wake events.
 
-Browser clients send 16 kHz float32 PCM through ``/wake_word/audio``.
+Browser clients send 16 kHz float32 PCM through ``/wake_word/audio``, and pick
+the keyword set there with a text message ``{"type": "keywords", "set":
+"wake" | "answer"}`` ("answer" while a video call rings), as on Android.
 """
 from __future__ import annotations
 
 import json
-import os
 import queue
 import threading
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, Response, jsonify, stream_with_context
 import numpy as np
 
-from wake_word import SherpaKwsEngine, SherpaUnavailable
-from wake_word.sherpa_wrapper import model_dir_from_env
+from wake_word import OpenWakeWordEngine, WakeModelsUnavailable
+from wake_word.openwakeword_engine import model_dir_from_env
 
 
 wake_word_bp = Blueprint("wake_word", __name__, url_prefix="/wake_word")
@@ -58,6 +58,7 @@ class _WakeWordManager:
         self._audio_samples: int = 0
         self._last_audio_at: float = 0.0
         self._last_audio_rms: float = 0.0
+        self._keywords: str = "wake"
         self._subscribers: List["queue.Queue[Dict[str, Any]]"] = []
         self._sub_lock = threading.Lock()
 
@@ -66,40 +67,25 @@ class _WakeWordManager:
         with self._lock:
             if self._engine is not None:
                 return self._status_locked()
-            mode = "sherpa"
+            mode = "openwakeword"
             reason = ""
             engine: Any = None
             try:
-                model_root = Path(
-                    os.environ.get(
-                        "BM_HOST_DATA_DIR",
-                        str(Path(__file__).resolve().parent.parent / "data"),
-                    )
-                )
-                model_dir = model_dir_from_env(model_root)
-                engine = SherpaKwsEngine(model_dir=model_dir, on_wake=self._on_wake)
-            except SherpaUnavailable as exc:
+                engine = OpenWakeWordEngine(model_dir=model_dir_from_env(), on_wake=self._on_wake)
+            except WakeModelsUnavailable as exc:
                 reason = str(exc)
                 engine = None
             except Exception as exc:  # noqa: BLE001
-                reason = f"sherpa init failed: {exc}"
+                reason = f"openWakeWord init failed: {exc}"
                 engine = None
             if engine is None:
                 self._mode = "stopped"
-                self._reason = reason or "Sherpa wake-word engine unavailable"
+                self._reason = reason or "openWakeWord engine unavailable"
                 return {
                     **self._status_locked(),
                     "error": self._reason,
                 }
-            try:
-                engine.start()
-            except Exception as exc:  # noqa: BLE001
-                # Surface initialization errors; there is no mock fallback.
-                return {
-                    "running": False,
-                    "mode": "stopped",
-                    "error": f"engine start failed: {exc}",
-                }
+            engine.set_keywords(self._keywords)
             self._engine = engine
             self._mode = mode
             self._reason = reason
@@ -108,16 +94,20 @@ class _WakeWordManager:
     def stop(self) -> Dict[str, Any]:
         with self._lock:
             if self._engine is not None:
-                try:
-                    self._engine.stop()
-                except Exception:  # noqa: BLE001
-                    pass
                 self._engine = None
                 self._mode = "stopped"
             status = self._status_locked()
         # Wake subscribers so their long-polls / sockets exit cleanly.
         self._broadcast({"type": "stopped", "timestamp": time.time()})
         return status
+
+    def set_keywords(self, keywords: str) -> Dict[str, Any]:
+        """Listen for "wake" (Hey Blimp) or "answer"; starts from fresh audio."""
+        with self._lock:
+            self._keywords = "answer" if keywords == "answer" else "wake"
+            if self._engine is not None:
+                self._engine.set_keywords(self._keywords)
+            return self._status_locked()
 
     # -- status ------------------------------------------------------------
     def status(self) -> Dict[str, Any]:
@@ -141,10 +131,11 @@ class _WakeWordManager:
 
     def _status_locked(self) -> Dict[str, Any]:
         running = self._engine is not None
-        audio_backend = getattr(self._engine, "audio_backend", None) if running else None
         return {
             "running": running,
             "mode": self._mode if running else "stopped",
+            "keywords": self._keywords,
+            "recent_peak_score": self._engine.recent_peak_score if running else 0.0,
             "reason": self._reason,
             "last_wake_at": self._last_wake_at,
             "last_wake_word": self._last_wake_word,
@@ -153,7 +144,7 @@ class _WakeWordManager:
             "audio_samples": self._audio_samples,
             "last_audio_at": self._last_audio_at,
             "last_audio_rms": self._last_audio_rms,
-            "audio_backend": audio_backend,
+            "audio_backend": "web-audio" if running else None,
             "transport": "websocket" if _HAVE_SOCK else "sse",
         }
 
@@ -186,14 +177,14 @@ class _WakeWordManager:
                     pass
 
     # -- engine callback ---------------------------------------------------
-    def _on_wake(self, word: str) -> None:
+    def _on_wake(self, word: str, keywords: str) -> None:
+        # Called from accept_audio(), which runs outside self._lock
         ts = time.time()
-        with self._lock:
-            self._last_wake_at = ts
-            self._last_wake_word = word
-            self._wake_count += 1
+        self._last_wake_at = ts
+        self._last_wake_word = word
+        self._wake_count += 1
         self._broadcast(
-            {"type": "wake", "word": word, "timestamp": ts}
+            {"type": "wake", "word": word, "keywords": keywords, "timestamp": ts}
         )
 
 
@@ -267,6 +258,13 @@ if _HAVE_SOCK and _sock is not None:  # pragma: no cover - optional dep
                     break
                 if isinstance(payload, (bytes, bytearray, memoryview)):
                     manager.accept_audio(bytes(payload))
+                else:
+                    try:
+                        message = json.loads(payload)
+                    except (TypeError, ValueError):
+                        message = {}
+                    if message.get("type") == "keywords":
+                        ws.send(json.dumps({"type": "status", **manager.set_keywords(str(message.get("set")))}))
                 while True:
                     try:
                         event = q.get_nowait()

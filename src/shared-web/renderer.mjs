@@ -11,6 +11,7 @@ import { createBackendSetupDialog } from "./ui/backend-config-ui.mjs";
 import { createChatPanel } from "./ui/chat-panel.mjs";
 import { createActivationDialog } from "./ui/activation-dialog.mjs";
 import { createWakeProvider, WakeCoordinator } from "../xiaozhi/wake/wake-coordinator.mjs";
+import { ReadyKeeper } from "../xiaozhi/conversation/ready-keeper.mjs";
 import { CallController } from "../videochat/call-controller.mjs";
 import { loadCallConfig, saveCallConfig, validateCallConfig } from "../videochat/call-config.mjs";
 import { registerVideoCallTools } from "../xiaozhi/mcp/tools/video-call.mjs";
@@ -1064,7 +1065,19 @@ if (window.hostBridge && window.hostBridge.storage) {
       })
     });
 
-    conv.connect().catch((err) => console.error("[xz] ws connect failed:", err));
+    // --- Always ready: connected and listening for the wake word while idle --
+    const wakeEnabled = globalThis.hostInfo?.wakeWord?.enabled !== false;
+    window.__xz.readyKeeper = new ReadyKeeper({
+      conversation: conv,
+      getWakeCoordinator: () => (wakeEnabled ? window.__xz.wakeCoordinator || null : null),
+      isBusy: () => callController.busy,
+      log: (level, message, detail = {}) => chatPanel.addLog({
+        ts: new Date().toISOString(), level, message, detail: { source: "ready", ...detail }
+      })
+    });
+    callController.addEventListener("status", () => window.__xz.readyKeeper.check());
+    // Its first check connects
+    window.__xz.readyKeeper.start();
   } catch (err) {
     console.error("[xz] init failed:", err);
     chatPanel.setConnected(false, "Init failed");

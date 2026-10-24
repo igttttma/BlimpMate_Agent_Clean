@@ -244,23 +244,19 @@ export class CallController extends EventTarget {
     try { await this.getWakeCoordinator()?.start(); } catch {}
   }
 
-  /** Listen for a keyword set ("answer" or "wake") on the wake-word engine. */
+  /**
+   * Listen for a keyword set ("answer" or "wake") on the wake-word engine: the
+   * Android bridge, or the desktop service's provider (the same models).
+   */
   _listenFor(set, onHit) {
     this._stopListening();
-    const native = this.nativeWake;
-    let off;
-    if (typeof native?.startKeywords === "function") {
-      off = native.onWake((e) => {
-        if ((e?.keywords || "wake") === set) onHit(e);
-      });
-      native.startKeywords(set);
-      this._stopKeywords = () => { off(); native.stop(); };
-    } else if (this.wakeProvider) {
-      // The desktop engine only knows "Hey Blimp"; it stands in for "answer"
-      off = this.wakeProvider.onWake(onHit);
-      this.wakeProvider.start().catch(() => {});
-      this._stopKeywords = () => { off(); this.wakeProvider.stop?.().catch?.(() => {}); };
-    }
+    const engine = typeof this.nativeWake?.startKeywords === "function" ? this.nativeWake : this.wakeProvider;
+    if (typeof engine?.startKeywords !== "function") return;
+    const off = engine.onWake((e) => {
+      if ((e?.keywords || "wake") === set) onHit(e);
+    });
+    Promise.resolve(engine.startKeywords(set)).catch(() => {});
+    this._stopKeywords = () => { off(); Promise.resolve(engine.stop?.()).catch(() => {}); };
   }
 
   _stopListening() {

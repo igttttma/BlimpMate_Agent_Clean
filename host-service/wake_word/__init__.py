@@ -1,5 +1,5 @@
-"""Sherpa-ONNX wake-word engine."""
+"""openWakeWord wake-word engine (the same models as the Android app)."""
 
-from .sherpa_wrapper import SherpaKwsEngine, SherpaUnavailable
+from .openwakeword_engine import OpenWakeWordEngine, WakeModelsUnavailable
 
-__all__ = ["SherpaKwsEngine", "SherpaUnavailable"]
+__all__ = ["OpenWakeWordEngine", "WakeModelsUnavailable"]

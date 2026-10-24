@@ -8,7 +8,7 @@
     "build:web": "npm run build:renderer",
     "build:renderer": "esbuild src/shared-web/renderer.mjs --bundle --outfile=src/shared-web/renderer.bundle.js --platform=browser --format=iife",
     "demo": "npm run build:web && electron .",
-    "test:wake": "node src/xiaozhi/wake/__tests__/wake-coordinator.test.mjs && node src/xiaozhi/wake/__tests__/session-and-mouth.test.mjs && node src/xiaozhi/audio/__tests__/audio-capture.test.mjs",
+    "test:wake": "node src/xiaozhi/wake/__tests__/wake-coordinator.test.mjs && node src/xiaozhi/wake/__tests__/session-and-mouth.test.mjs && node src/xiaozhi/audio/__tests__/audio-capture.test.mjs && node src/xiaozhi/conversation/__tests__/ready-keeper.test.mjs",
     "test:backend": "node src/xiaozhi/config/__tests__/backend-config.test.mjs",
     "smoke:wake-web": "node scripts/wake-web-audio-smoke.mjs",
     "xiaozhi:activate": "node scripts/xiaozhi-activate.mjs",

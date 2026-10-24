@@ -30,6 +30,11 @@ class NativeWakeProvider {
     this.unsubscribe = null;
     return this.bridge.stop();
   }
+
+  /** What the detector is doing now ({ running, message, ... }). */
+  getStatus() {
+    return this.bridge.getStatus?.() || null;
+  }
 }
 
 export function createWakeProvider({ hostServiceUrl, audioCapture, nativeBridge } = {}) {

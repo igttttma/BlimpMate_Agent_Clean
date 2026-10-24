@@ -6,7 +6,7 @@ import { LipSync } from "../xiaozhi/audio/lip-sync.mjs";
 // has it, in this order:
 //   video call (ringing, calling or in a call)  ended
 //   wake activation in progress                 let finish (bounded), then
-//   conversation (listening, thinking, speaking) ended; the server link closes
+//   conversation (listening, thinking, speaking) ended; the server link stays
 //   other page media and host audio             paused / stopped
 // Ending the call or the conversation re-arms the wake word as usual, so it
 // stays armed while the clip plays: "Hey Blimp", a new conversation or an
@@ -199,8 +199,9 @@ export class MediaPlayback extends EventTarget {
       ]);
     }
     const conv = this.conversation;
-    if (conv.protocol?.isOpen?.() || conv._autoSessionActive || conv.state.device !== DeviceState.IDLE) {
-      try { await conv.endSession(); } catch {}
+    if (!conv.idle) {
+      // Ends the conversation; the server link stays up for the next one
+      try { await conv.endSession({ disconnect: false }); } catch {}
     }
     for (const media of document.querySelectorAll("audio, video")) {
       try { media.pause(); } catch {}

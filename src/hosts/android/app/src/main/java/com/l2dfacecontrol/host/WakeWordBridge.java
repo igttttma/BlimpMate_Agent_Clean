@@ -7,6 +7,8 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
@@ -42,6 +44,12 @@ public final class WakeWordBridge {
     private final WebView webView;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean workerActive = new AtomicBoolean(false);
+    // A failed detector (mic busy or lost, audio server restart) retries while
+    // the wake word is wanted, backing off from RETRY_MIN_MS to RETRY_MAX_MS
+    private static final long RETRY_MIN_MS = 1000;
+    private static final long RETRY_MAX_MS = 30000;
+    private final Handler retryHandler = new Handler(Looper.getMainLooper());
+    private volatile long retryDelayMs = RETRY_MIN_MS;
 
     private volatile boolean requested;
     private volatile boolean running;
@@ -78,6 +86,8 @@ public final class WakeWordBridge {
         keywordSet = "answer".equals(set) ? "answer" : "wake";
         if (released) return status(false, "released");
         requested = true;
+        retryHandler.removeCallbacksAndMessages(null);
+        retryDelayMs = RETRY_MIN_MS;
         if (!hasAudioPermission()) {
             return status(false, "microphone_permission_required");
         }
@@ -88,6 +98,7 @@ public final class WakeWordBridge {
     @JavascriptInterface
     public String stop() {
         requested = false;
+        retryHandler.removeCallbacksAndMessages(null);
         stopRecorder();
         return status(false, "stopping");
     }
@@ -134,7 +145,10 @@ public final class WakeWordBridge {
 
     @JavascriptInterface
     public String getStatus() {
-        return status(running, lastError.isEmpty() ? (running ? "listening" : "stopped") : lastError);
+        // "stopped" only when nobody wants it: a worker starting up or a retry
+        // waiting says so
+        String state = running ? "listening" : requested ? "starting" : "stopped";
+        return status(running, lastError.isEmpty() ? state : lastError);
     }
 
     public void onAudioPermissionResult(boolean granted) {
@@ -149,6 +163,7 @@ public final class WakeWordBridge {
     public void release() {
         released = true;
         requested = false;
+        retryHandler.removeCallbacksAndMessages(null);
         stopRecorder();
         executor.shutdownNow();
         synchronized (this) {
@@ -175,8 +190,16 @@ public final class WakeWordBridge {
                 postStatus(false, lastError.isEmpty() ? "stopped" : lastError);
                 // A start() that arrived while this worker was winding down
                 if (requested && !released && lastError.isEmpty()) scheduleWorker();
+                else if (requested && !released) scheduleRetry();
             }
         });
+    }
+
+    private void scheduleRetry() {
+        long delay = retryDelayMs;
+        retryDelayMs = Math.min(retryDelayMs * 2, RETRY_MAX_MS);
+        Log.w(TAG, "Wake-word detector stopped (" + lastError + "); retrying in " + delay + " ms");
+        retryHandler.postDelayed(this::scheduleWorker, delay);
     }
 
     private synchronized OpenWakeWord getDetector() throws Exception {
@@ -229,6 +252,9 @@ public final class WakeWordBridge {
             lastAudioRms = 0f;
             peakAudioRms = 0f;
             recorder.startRecording();
+            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                throw new IllegalStateException("AudioRecord did not start (microphone busy?)");
+            }
             running = true;
             postStatus(true, "listening");
 
@@ -240,7 +266,13 @@ public final class WakeWordBridge {
             int chunks = 0;
             while (requested && !released) {
                 int count = recorder.read(pcm, 0, pcm.length);
+                // stop() makes a blocked read return early; anything else negative
+                // is a dead recorder (e.g. ERROR_DEAD_OBJECT): fail and retry
+                if (count < 0 && requested && !released) {
+                    throw new IllegalStateException("AudioRecord read failed: " + count);
+                }
                 if (count <= 0) continue;
+                retryDelayMs = RETRY_MIN_MS;
                 if (debuggable) recordDebugAudio(pcm, count);
                 double sumSquares = 0;
                 for (int i = 0; i < count; i++) {

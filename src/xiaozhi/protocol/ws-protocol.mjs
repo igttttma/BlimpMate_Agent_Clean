@@ -203,8 +203,7 @@ export class WsProtocol extends EventTarget {
     const hello = {
       type: ClientMsg.HELLO,
       version: 1,
-      // greeting_url: the wake greeting comes as a link to play, not as reply audio
-      features: { mcp: true, greeting_url: true },
+      features: { mcp: true },
       transport: "websocket",
       audio_params: {
         format: "opus",
@@ -260,6 +259,11 @@ export class WsProtocol extends EventTarget {
     const msg = { session_id: this.sessionId, type: ClientMsg.ABORT };
     if (reason) msg.reason = reason;
     return this._sendText(msg);
+  }
+  // Counts as activity on the server (enable_websocket_ping), which otherwise
+  // closes a link with nothing going on
+  sendPing() {
+    return this._sendText({ type: "ping" });
   }
   sendMcp(payload) {
     return this._sendText({ session_id: this.sessionId, type: ClientMsg.MCP, payload });

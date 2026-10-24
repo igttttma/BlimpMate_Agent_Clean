@@ -34538,6 +34538,7 @@ void main(void)\r
       this._activations = 0;
       this._listenGen = 0;
       this._pingTimer = null;
+      this._linkStale = false;
       this._sttText = "";
       this._ttsText = "";
       this._connectionState = {
@@ -34669,6 +34670,7 @@ void main(void)\r
         if (this.protocol === protocol) fn(e2);
       };
       this.protocol.addEventListener("open", current(() => {
+        this._linkStale = false;
         this._startIdlePing();
         this._emitLog("info", "session open");
         this._connectionState.isConnected = true;
@@ -34751,6 +34753,15 @@ void main(void)\r
     _stopIdlePing() {
       clearInterval(this._pingTimer);
       this._pingTimer = null;
+    }
+    /**
+     * The server's settings changed (portal Save). A connection takes them when
+     * it opens, so the ready keeper reconnects once no conversation is going on.
+     */
+    markLinkStale() {
+      if (!this.protocol?.isOpen()) return;
+      this._linkStale = true;
+      this.dispatchEvent(new CustomEvent("link-stale"));
     }
     async endSession({ disconnect = true } = {}) {
       this._autoSessionActive = false;
@@ -36195,6 +36206,7 @@ void main(void)\r
       const check = () => this.check();
       conv.addEventListener("session-ended", check);
       conv.addEventListener("disconnected", check);
+      conv.addEventListener("link-stale", check);
       conv.state.addEventListener("device", check);
       const now = () => {
         this._nextConnectAt = 0;
@@ -36238,7 +36250,9 @@ void main(void)\r
       const conv = this.conversation;
       if (conv.protocol?.isOpen?.()) {
         this._retryMs = RETRY_MIN_MS;
-        return;
+        if (!conv._linkStale) return;
+        this.log("info", "Server settings changed; reconnecting to apply them");
+        await conv.disconnect();
       }
       if (Date.now() < this._nextConnectAt) return;
       const ok = await conv.connect();
@@ -37822,6 +37836,8 @@ void main(void)\r
           log("info", `Interrupt ${bargeIn ? "on" : "off"} (from the next time the Blimp listens)`);
         }
         conversation.bargeIn = bargeIn;
+      } else if (msg.type === "config_reloaded") {
+        conversation.markLinkStale();
       } else if (msg.type === "videos" && Array.isArray(msg.videos)) {
         const origin = httpOrigin(conversation.wsUrl, msg.http_port);
         videos.sync(msg.videos.map((v2) => ({ ...v2, url: new URL(v2.path, origin).toString() })));

@@ -104,6 +104,27 @@ async function testRearmsWakeWord() {
   }
 }
 
+// Portal Save: the open link has the old settings; reconnect once idle, not mid-conversation
+async function testReconnectsStaleLinkWhenIdle() {
+  let open = true;
+  const conv = fakeConversation({ open: true });
+  conv.protocol = { isOpen: () => open };
+  conv.connect = async () => { conv.connects++; open = true; conv._linkStale = false; return true; };
+  conv.disconnect = async () => { conv.disconnects = (conv.disconnects || 0) + 1; open = false; };
+  conv._linkStale = true;
+  conv.idle = false;
+  const k = keeper(conv, fakeWake());
+  k.check();
+  await tick();
+  assert.equal(conv.disconnects, undefined, "a conversation keeps its link");
+  conv.idle = true;
+  k.check();
+  await tick();
+  assert.equal(conv.disconnects, 1);
+  assert.equal(conv.connects, 1);
+  assert.equal(conv._linkStale, false);
+}
+
 // The server closes the link right as a reply ends: the reply's "listen again"
 // must not reopen the microphone after the close stopped listening
 async function testLateStartListeningGivesUp() {
@@ -140,5 +161,6 @@ await testConnectsWhenIdle();
 await testLeavesBusyAndConversationsAlone();
 await testBacksOffWhileUnreachable();
 await testRearmsWakeWord();
+await testReconnectsStaleLinkWhenIdle();
 await testLateStartListeningGivesUp();
 console.log("ready keeper tests: ok");

@@ -56,6 +56,7 @@ export class Conversation extends EventTarget {
     this._activations = 0; // wake activations under way (connecting, greeting)
     this._listenGen = 0; // bumped by stopListening(): a startListening() still starting gives up
     this._pingTimer = null;
+    this._linkStale = false; // the server's settings changed since this link opened
     this._sttText = "";
     this._ttsText = "";
     this._connectionState = {
@@ -205,6 +206,7 @@ export class Conversation extends EventTarget {
     this.protocol = protocol;
     const current = (fn) => (e) => { if (this.protocol === protocol) fn(e); };
     this.protocol.addEventListener("open", current(() => {
+      this._linkStale = false;
       this._startIdlePing();
       this._emitLog("info", "session open");
       this._connectionState.isConnected = true;
@@ -290,6 +292,16 @@ export class Conversation extends EventTarget {
   _stopIdlePing() {
     clearInterval(this._pingTimer);
     this._pingTimer = null;
+  }
+
+  /**
+   * The server's settings changed (portal Save). A connection takes them when
+   * it opens, so the ready keeper reconnects once no conversation is going on.
+   */
+  markLinkStale() {
+    if (!this.protocol?.isOpen()) return;
+    this._linkStale = true;
+    this.dispatchEvent(new CustomEvent("link-stale"));
   }
 
   async endSession({ disconnect = true } = {}) {

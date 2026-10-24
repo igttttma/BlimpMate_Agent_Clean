@@ -89,6 +89,9 @@ export function startRemoteControl({ conversation, identity, callController, get
         log("info", `Interrupt ${bargeIn ? "on" : "off"} (from the next time the Blimp listens)`);
       }
       conversation.bargeIn = bargeIn;
+    } else if (msg.type === "config_reloaded") {
+      // Portal Save: the conversation link takes the new settings when it reopens
+      conversation.markLinkStale();
     } else if (msg.type === "videos" && Array.isArray(msg.videos)) {
       const origin = httpOrigin(conversation.wsUrl, msg.http_port);
       videos.sync(msg.videos.map((v) => ({ ...v, url: new URL(v.path, origin).toString() })));

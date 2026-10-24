@@ -39,6 +39,7 @@ export class ReadyKeeper {
     const check = () => this.check();
     conv.addEventListener("session-ended", check);
     conv.addEventListener("disconnected", check);
+    conv.addEventListener("link-stale", check);
     conv.state.addEventListener("device", check);
     // Back in front, or the network is back: try at once, not after the backoff
     const now = () => { this._nextConnectAt = 0; this._retryMs = RETRY_MIN_MS; this.check(); };
@@ -84,7 +85,10 @@ export class ReadyKeeper {
     const conv = this.conversation;
     if (conv.protocol?.isOpen?.()) {
       this._retryMs = RETRY_MIN_MS;
-      return;
+      if (!conv._linkStale) return;
+      // New server settings (voice, language, prompt...) apply to a new link
+      this.log("info", "Server settings changed; reconnecting to apply them");
+      await conv.disconnect();
     }
     if (Date.now() < this._nextConnectAt) return;
     const ok = await conv.connect();

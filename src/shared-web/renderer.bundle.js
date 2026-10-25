@@ -32012,6 +32012,84 @@ void main(void)\r
     (_a = this.__moc) == null ? void 0 : _a.release();
   }
 
+  // src/shared-web/face-layout.mjs
+  var FACE_BOUNDS = { x0: -0.7, x1: 0.7, y0: -0.41, y1: 0.4 };
+  var FACE_CENTER = { x: 0, y: 0.06 };
+  var MOVES = {
+    ArtMesh7: { cx: 0.38, cy: 0.353, dx: 0.19, dy: -0.17, scale: 0.85 },
+    // Joy sun
+    ArtMesh3: { cx: 0.34, cy: 0.32, dx: 0.22, dy: -0.15, scale: 1 },
+    // Question mark
+    ArtMesh5: { cx: 0.386, cy: 0.359, dx: 0.17, dy: -0.18, scale: 1 },
+    // Sweat drop
+    ArtMesh4: { cx: -0.38, cy: 0.34, dx: -0.18, dy: -0.16, scale: 1 }
+    // Anger mark
+  };
+  var FOCUS_ID = "ArtMesh2";
+  var FOCUS_ANGLE_KEEP = 0.45;
+  var FOCUS_RADIUS_X = 1.3;
+  var FOCUS_RADIUS_Y = 0.8;
+  var pieceCache = /* @__PURE__ */ new Map();
+  function meshPieces(id, indices2, vertexCount) {
+    let pieces = pieceCache.get(id);
+    if (pieces) return pieces;
+    const parent = Array.from({ length: vertexCount }, (_, i2) => i2);
+    const find = (i2) => parent[i2] === i2 ? i2 : parent[i2] = find(parent[i2]);
+    for (let t2 = 0; t2 < indices2.length; t2 += 3) {
+      const a2 = find(indices2[t2]);
+      parent[find(indices2[t2 + 1])] = a2;
+      parent[find(indices2[t2 + 2])] = a2;
+    }
+    const groups = /* @__PURE__ */ new Map();
+    for (let i2 = 0; i2 < vertexCount; i2++) {
+      const root = find(i2);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(i2);
+    }
+    pieces = [...groups.values()];
+    pieceCache.set(id, pieces);
+    return pieces;
+  }
+  function foldAroundFace(x2, y2) {
+    const dx = x2 - FACE_CENTER.x;
+    const dy = y2 - FACE_CENTER.y;
+    const r2 = Math.hypot(dx, dy);
+    const a2 = Math.atan2(dy, dx);
+    const side = Math.abs(a2) <= Math.PI / 2 ? 0 : Math.PI;
+    const fromSide = side === 0 ? a2 : a2 > 0 ? a2 - Math.PI : a2 + Math.PI;
+    const folded = side + fromSide * FOCUS_ANGLE_KEEP;
+    return [FACE_CENTER.x + r2 * Math.cos(folded) * FOCUS_RADIUS_X, FACE_CENTER.y + r2 * Math.sin(folded) * FOCUS_RADIUS_Y];
+  }
+  function layoutVertices(id, src, out, indices2) {
+    const move = MOVES[id];
+    if (move) {
+      for (let i2 = 0; i2 < src.length; i2 += 2) {
+        out[i2] = move.cx + move.dx + (src[i2] - move.cx) * move.scale;
+        out[i2 + 1] = move.cy + move.dy + (src[i2 + 1] - move.cy) * move.scale;
+      }
+      return out;
+    }
+    if (id === FOCUS_ID && indices2) {
+      for (const piece of meshPieces(id, indices2, src.length / 2)) {
+        let cx = 0;
+        let cy = 0;
+        for (const v2 of piece) {
+          cx += src[2 * v2];
+          cy += src[2 * v2 + 1];
+        }
+        cx /= piece.length;
+        cy /= piece.length;
+        const [nx, ny] = foldAroundFace(cx, cy);
+        for (const v2 of piece) {
+          out[2 * v2] = src[2 * v2] + nx - cx;
+          out[2 * v2 + 1] = src[2 * v2 + 1] + ny - cy;
+        }
+      }
+      return out;
+    }
+    return null;
+  }
+
   // src/shared-web/live2d-renderer.mjs
   Live2DModel.registerTicker(Ticker);
   function getAssetBase() {
@@ -32059,6 +32137,7 @@ void main(void)\r
           coreModel.setParameterValueById(id, value);
         }
       });
+      _applyFaceLayout(_model.internalModel.coreModel);
       _fitModel();
       console.log("[Live2D] Model loaded successfully");
       return true;
@@ -32067,14 +32146,31 @@ void main(void)\r
       return false;
     }
   }
+  function _applyFaceLayout(coreModel) {
+    const original = coreModel.getDrawableVertices.bind(coreModel);
+    const buffers = /* @__PURE__ */ new Map();
+    coreModel.getDrawableVertices = (index) => {
+      const src = original(index);
+      let out = buffers.get(index);
+      if (!out) {
+        out = new Float32Array(src.length);
+        buffers.set(index, out);
+      }
+      const id = coreModel.getDrawableId(index);
+      return layoutVertices(id, src, out, coreModel.getDrawableVertexIndices(index)) || src;
+    };
+  }
   function _fitModel() {
     if (!_model || !_app) return;
     const { width, height } = _app.screen;
+    const unit = _model.internalModel.originalHeight;
+    const bandWidth = (FACE_BOUNDS.x1 - FACE_BOUNDS.x0) * unit;
+    const bandHeight = (FACE_BOUNDS.y1 - FACE_BOUNDS.y0) * unit;
+    const scale = Math.min(width / bandWidth, height / bandHeight);
     _model.anchor.set(0.5, 0.5);
-    _model.x = width / 2;
-    _model.y = height / 2;
-    const scale = height / _model.internalModel.originalHeight;
     _model.scale.set(scale);
+    _model.x = width / 2 - (FACE_BOUNDS.x0 + FACE_BOUNDS.x1) / 2 * unit * scale;
+    _model.y = height / 2 + (FACE_BOUNDS.y0 + FACE_BOUNDS.y1) / 2 * unit * scale;
   }
 
   // src/core/expression-data.mjs

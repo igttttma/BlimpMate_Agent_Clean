@@ -1,5 +1,6 @@
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display/cubism4";
+import { FACE_BOUNDS, layoutVertices } from "./face-layout.mjs";
 
 Live2DModel.registerTicker(PIXI.Ticker);
 
@@ -63,6 +64,7 @@ export async function initLive2D(container, getParams, onTick) {
         coreModel.setParameterValueById(id, value);
       }
     });
+    _applyFaceLayout(_model.internalModel.coreModel);
 
     _fitModel();
     console.log("[Live2D] Model loaded successfully");
@@ -73,12 +75,34 @@ export async function initLive2D(container, getParams, onTick) {
   }
 }
 
+// The renderer reads every drawable's vertices through getDrawableVertices;
+// icon drawables get moved copies (face-layout.mjs), the rest pass through
+function _applyFaceLayout(coreModel) {
+  const original = coreModel.getDrawableVertices.bind(coreModel);
+  const buffers = new Map();
+  coreModel.getDrawableVertices = (index) => {
+    const src = original(index);
+    let out = buffers.get(index);
+    if (!out) {
+      out = new Float32Array(src.length);
+      buffers.set(index, out);
+    }
+    const id = coreModel.getDrawableId(index);
+    return layoutVertices(id, src, out, coreModel.getDrawableVertexIndices(index)) || src;
+  };
+}
+
+// Fit the face band (not the whole canvas, whose icon space would leave the
+// face small); the canvas origin is the model's anchor centre
 function _fitModel() {
   if (!_model || !_app) return;
   const { width, height } = _app.screen;
+  const unit = _model.internalModel.originalHeight; // canvas height = 1 model unit
+  const bandWidth = (FACE_BOUNDS.x1 - FACE_BOUNDS.x0) * unit;
+  const bandHeight = (FACE_BOUNDS.y1 - FACE_BOUNDS.y0) * unit;
+  const scale = Math.min(width / bandWidth, height / bandHeight);
   _model.anchor.set(0.5, 0.5);
-  _model.x = width / 2;
-  _model.y = height / 2;
-  const scale = height / _model.internalModel.originalHeight;
   _model.scale.set(scale);
+  _model.x = width / 2 - ((FACE_BOUNDS.x0 + FACE_BOUNDS.x1) / 2) * unit * scale;
+  _model.y = height / 2 + ((FACE_BOUNDS.y0 + FACE_BOUNDS.y1) / 2) * unit * scale;
 }

@@ -64,11 +64,11 @@ export function createLocalHostBridge(core, options = {}) {
     setEmotion(emotion, immediate = false) {
       applyExplicit(mapEmotionToExpression(emotion), immediate);
     },
-    /** Emotion the server derived from the reply text; skipped while an explicit expression plays. */
-    setTextEmotion(emotion, immediate = false) {
+    /** Expression the reply opens with (an ExpressionType name); skipped while an explicit expression plays. */
+    setReplyExpression(name, immediate = false) {
       if (explicitExpressionPlaying()) return false;
       explicitTarget = null;
-      applyExpression(mapEmotionToExpression(emotion), immediate);
+      applyExpression(Object.values(ExpressionType).includes(name) ? name : ExpressionType.None, immediate);
       return true;
     },
     setMouthOpen(value) {

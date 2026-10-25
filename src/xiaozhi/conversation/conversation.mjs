@@ -654,9 +654,9 @@ export class Conversation extends EventTarget {
         this.dispatchEvent(new CustomEvent("stt-text", { detail: msg.text }));
       }
     } else if (type === "llm") {
-      if (msg.emotion) {
-        this.bridge.setTextEmotion(msg.emotion);
-        this.dispatchEvent(new CustomEvent("emotion", { detail: msg.emotion }));
+      if (msg.expression) {
+        this.bridge.setReplyExpression(msg.expression);
+        this.dispatchEvent(new CustomEvent("emotion", { detail: msg.expression }));
       }
     } else if (type === "mcp") {
       if (msg.payload) this.mcp.handleIncoming(msg.payload);

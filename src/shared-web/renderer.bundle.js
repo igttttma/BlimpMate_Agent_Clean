@@ -32864,11 +32864,11 @@ void main(void)\r
       setEmotion(emotion, immediate = false) {
         applyExplicit(mapEmotionToExpression(emotion), immediate);
       },
-      /** Emotion the server derived from the reply text; skipped while an explicit expression plays. */
-      setTextEmotion(emotion, immediate = false) {
+      /** Expression the reply opens with (an ExpressionType name); skipped while an explicit expression plays. */
+      setReplyExpression(name, immediate = false) {
         if (explicitExpressionPlaying()) return false;
         explicitTarget = null;
-        applyExpression(mapEmotionToExpression(emotion), immediate);
+        applyExpression(Object.values(ExpressionType).includes(name) ? name : ExpressionType.None, immediate);
         return true;
       },
       setMouthOpen(value) {
@@ -35099,9 +35099,9 @@ void main(void)\r
           this.dispatchEvent(new CustomEvent("stt-text", { detail: msg.text }));
         }
       } else if (type === "llm") {
-        if (msg.emotion) {
-          this.bridge.setTextEmotion(msg.emotion);
-          this.dispatchEvent(new CustomEvent("emotion", { detail: msg.emotion }));
+        if (msg.expression) {
+          this.bridge.setReplyExpression(msg.expression);
+          this.dispatchEvent(new CustomEvent("emotion", { detail: msg.expression }));
         }
       } else if (type === "mcp") {
         if (msg.payload) this.mcp.handleIncoming(msg.payload);

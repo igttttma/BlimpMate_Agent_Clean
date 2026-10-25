@@ -85,9 +85,42 @@ function testExpressionAutoRecoversAfterDefaultDuration() {
   assert.equal(core.targetExpression, ExpressionType.None);
 }
 
+function testTextEmotionSkippedWhileToolExpressionPlays() {
+  const core = new Live2DControlCore({ expressionTransitionDuration: 1 });
+  const bridge = createLocalHostBridge(core, { storage: { get() { return null; }, set() {}, remove() {} } });
+
+  // Text emotion with no explicit expression applies
+  assert.equal(bridge.setTextEmotion("sad"), true);
+  assert.equal(core.targetExpression, ExpressionType.Sadness);
+
+  // Tool expression wins over the reply's text emotion until it recovers
+  bridge.setExpression(ExpressionType.Love);
+  core.update(3);
+  assert.equal(bridge.setTextEmotion("happy"), false);
+  assert.equal(core.targetExpression, ExpressionType.Love);
+  core.update(3.1); // auto-recover after 6 s
+  assert.equal(core.targetExpression, ExpressionType.None);
+  assert.equal(bridge.setTextEmotion("happy"), true);
+  assert.equal(core.targetExpression, ExpressionType.Joy);
+
+  // A tool clear holds neutral until the fade ends
+  bridge.clearExpression();
+  core.update(0.5);
+  assert.equal(bridge.setTextEmotion("angry"), false);
+  core.update(0.6);
+  assert.equal(bridge.setTextEmotion("angry"), true);
+  assert.equal(core.targetExpression, ExpressionType.Anger);
+
+  // Tool emotion keyword counts as explicit too
+  bridge.setEmotion("surprised");
+  assert.equal(bridge.setTextEmotion("sad"), false);
+  assert.equal(core.targetExpression, ExpressionType.Surprise);
+}
+
 await testSessionEndTool();
 await testMouthWatchdogClosesOnSilence();
 testExpressionCannotOpenSilentMouth();
 testDefaultMouthGainAndLimit();
 testExpressionAutoRecoversAfterDefaultDuration();
+testTextEmotionSkippedWhileToolExpressionPlays();
 console.log("session control and mouth watchdog tests: ok");

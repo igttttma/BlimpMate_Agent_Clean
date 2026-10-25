@@ -655,7 +655,7 @@ export class Conversation extends EventTarget {
       }
     } else if (type === "llm") {
       if (msg.emotion) {
-        this.bridge.setEmotion(msg.emotion);
+        this.bridge.setTextEmotion(msg.emotion);
         this.dispatchEvent(new CustomEvent("emotion", { detail: msg.emotion }));
       }
     } else if (type === "mcp") {

@@ -27,24 +27,49 @@ function defaultStorage() {
 export function createLocalHostBridge(core, options = {}) {
   const storage = options.storage || defaultStorage();
   const hostInfo = options.hostInfo || { platform: "web", arch: "unknown" };
+  // Expression from an explicit command (the AI's self.* tool calls, manual
+  // controls). The reply's text emotion must not override it while it plays.
+  let explicitTarget = null;
+
+  function applyExpression(target, immediate) {
+    if (!target || target === ExpressionType.None) {
+      core.clearExpression(immediate);
+    } else {
+      core.setExpression(target, immediate);
+    }
+  }
+
+  // Still showing = not replaced or auto-recovered yet (a clear counts until
+  // its fade back to neutral ends)
+  function explicitExpressionPlaying() {
+    if (explicitTarget === null || core.targetExpression !== explicitTarget) return false;
+    return explicitTarget !== ExpressionType.None || core.expressionIntensity > 0;
+  }
+
+  function applyExplicit(target, immediate) {
+    explicitTarget = target || ExpressionType.None;
+    applyExpression(target, immediate);
+  }
 
   return {
     tick(dt) {
       core.update(dt);
     },
     setExpression(name, immediate = false) {
-      core.setExpression(name, immediate);
+      applyExplicit(name, immediate);
     },
     clearExpression(immediate = false) {
-      core.clearExpression(immediate);
+      applyExplicit(ExpressionType.None, immediate);
     },
     setEmotion(emotion, immediate = false) {
-      const target = mapEmotionToExpression(emotion);
-      if (!target || target === ExpressionType.None) {
-        core.clearExpression(immediate);
-      } else {
-        core.setExpression(target, immediate);
-      }
+      applyExplicit(mapEmotionToExpression(emotion), immediate);
+    },
+    /** Emotion the server derived from the reply text; skipped while an explicit expression plays. */
+    setTextEmotion(emotion, immediate = false) {
+      if (explicitExpressionPlaying()) return false;
+      explicitTarget = null;
+      applyExpression(mapEmotionToExpression(emotion), immediate);
+      return true;
     },
     setMouthOpen(value) {
       core.setExternalMouthOpen(value);

@@ -84,6 +84,7 @@ public final class MainActivity extends Activity {
             webView.addJavascriptInterface(wakeWordBridge, "__nativeWakeWordRaw");
             // Media + call volume at max; replies (mic open, call mode) as loud as the greeting
             callModeVolume = new CallModeVolume(this);
+            webView.addJavascriptInterface(callModeVolume, "__nativeVolumeRaw");
             callModeVolume.start();
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED) {

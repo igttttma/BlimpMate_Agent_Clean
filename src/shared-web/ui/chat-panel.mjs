@@ -62,6 +62,14 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
         </div>
       </div>
 
+      <div class="xz-section" id="xzVolumeSection" hidden>
+        <div class="xz-section-label">Maximum volume</div>
+        <div class="xz-row">
+          <button type="button" class="xz-btn" id="xzMaxVolumeOn" title="Media and call volume to max at start and when the mic opens">On</button>
+          <button type="button" class="xz-btn" id="xzMaxVolumeOff" title="Leave the device's volumes alone">Off</button>
+        </div>
+      </div>
+
       <div class="xz-section">
         <button type="button" class="xz-talk" id="xzTalk">Start conversation</button>
         <button type="button" class="xz-btn" id="xzAbort">Stop</button>
@@ -193,6 +201,25 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
     callErrorEl.hidden = !error;
   });
   $("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
+
+  // Android app only: the native side keeps the setting (see CallModeVolume.java)
+  const volumeBridge = globalThis.__nativeVolumeRaw;
+  if (volumeBridge) {
+    const on = $("xzMaxVolumeOn");
+    const off = $("xzMaxVolumeOff");
+    const show = (value) => {
+      on.classList.toggle("xz-active", value);
+      off.classList.toggle("xz-active", !value);
+    };
+    const set = (value) => {
+      volumeBridge.setMaxVolume(value);
+      show(value);
+    };
+    on.addEventListener("click", () => set(true));
+    off.addEventListener("click", () => set(false));
+    show(volumeBridge.getMaxVolume());
+    $("xzVolumeSection").hidden = false;
+  }
   $("xzAbort").addEventListener("click", () => onAbort && onAbort());
 
   const applyMode = (nextMode, active = false) => {

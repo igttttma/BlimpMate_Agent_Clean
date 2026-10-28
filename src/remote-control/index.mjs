@@ -2,12 +2,14 @@ import { AbortReason, DeviceState } from "../xiaozhi/index.mjs";
 import { ControlChannel } from "./control-channel.mjs";
 import { MediaPlayback } from "./media-playback.mjs";
 import { VideoCache } from "./video-cache.mjs";
+import { maxVolume } from "../xiaozhi/audio/max-volume.mjs";
 
 // Realtime control from the server portal: the Blimp shows as online while the
 // control socket is open, reports what it is doing, and plays portal audio and
 // video. Videos are prefetched into a local cache so they start at once. The
 // portal can also set the avatar's expression and blinking (like the Debug
-// panel) and drive the conversation (like the Chat panel).
+// panel), drive the conversation (like the Chat panel) and switch the Android
+// app's "Maximum volume".
 
 /** The portal's HTTP origin: the conversation server's host on its HTTP port. */
 function httpOrigin(wsUrl, httpPort) {
@@ -48,6 +50,8 @@ export function startRemoteControl({ conversation, identity, callController, get
       loop: playback.loop,
       videos: videos.status(),
       avatar: avatarState(),
+      // Android app only; null elsewhere
+      max_volume: maxVolume.value,
       // Lists this Blimp in the portal (several can share one server)
       client: { user_agent: navigator.userAgent, platform: globalThis.hostInfo?.platform || "" }
     };
@@ -103,6 +107,9 @@ export function startRemoteControl({ conversation, identity, callController, get
       if (!playback.resume()) log("info", "Portal resume ignored: nothing is paused");
     } else if (msg.type === "set_loop") {
       playback.setLoop(msg.loop === true);
+    } else if (msg.type === "set_max_volume") {
+      if (maxVolume.set(msg.on === true)) log("info", `Maximum volume ${msg.on === true ? "on" : "off"} (from the portal)`);
+      else log("info", "Portal maximum volume ignored: only the Android app has it");
     } else if (msg.type === "answer_call") {
       // Fallback when the spoken "answer" isn't heard; ignored unless ringing
       if (!callController?.answer("portal")) log("info", "Portal answer ignored: no call is ringing");
@@ -161,6 +168,7 @@ export function startRemoteControl({ conversation, identity, callController, get
   }, 500);
 
   playback.addEventListener("change", report);
+  maxVolume.addEventListener("change", report);
   videos.addEventListener("change", report);
   conversation.state.addEventListener("device", report);
   conversation.addEventListener("wake", report);

@@ -63,16 +63,16 @@ public final class CallModeVolume {
     /** Turning it on applies it now; turning it off leaves the volumes where they are. */
     @JavascriptInterface
     public void setMaxVolume(boolean on) {
+        if (maxVolume == on) return;
+        maxVolume = on;
         prefs.edit().putBoolean(KEY_MAX, on).apply();
-        handler.post(() -> {
-            if (maxVolume == on) return;
-            maxVolume = on;
-            Log.i(TAG, "maximum volume " + (on ? "on" : "off"));
-            if (on && audio != null) {
+        Log.i(TAG, "maximum volume " + (on ? "on" : "off"));
+        if (on && audio != null) {
+            handler.post(() -> {
                 toMax(AudioManager.STREAM_MUSIC);
                 toMax(AudioManager.STREAM_VOICE_CALL);
-            }
-        });
+            });
+        }
     }
 
     void start() {

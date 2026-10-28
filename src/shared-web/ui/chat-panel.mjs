@@ -1,4 +1,5 @@
 import { createBackendForm } from "./backend-config-ui.mjs";
+import { maxVolume } from "../../xiaozhi/audio/max-volume.mjs";
 
 // Chat panel UI: toggle button + collapsible panel with connect, backend,
 // mode, big PTT button, abort, subtitle area, settings.
@@ -202,22 +203,18 @@ export function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBac
   });
   $("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
 
-  // Android app only: the native side keeps the setting (see CallModeVolume.java)
-  const volumeBridge = globalThis.__nativeVolumeRaw;
-  if (volumeBridge) {
+  // Android app only (also switchable from the server portal)
+  if (maxVolume.available) {
     const on = $("xzMaxVolumeOn");
     const off = $("xzMaxVolumeOff");
     const show = (value) => {
       on.classList.toggle("xz-active", value);
       off.classList.toggle("xz-active", !value);
     };
-    const set = (value) => {
-      volumeBridge.setMaxVolume(value);
-      show(value);
-    };
-    on.addEventListener("click", () => set(true));
-    off.addEventListener("click", () => set(false));
-    show(volumeBridge.getMaxVolume());
+    on.addEventListener("click", () => maxVolume.set(true));
+    off.addEventListener("click", () => maxVolume.set(false));
+    maxVolume.addEventListener("change", (e) => show(e.detail));
+    show(maxVolume.value);
     $("xzVolumeSection").hidden = false;
   }
   $("xzAbort").addEventListener("click", () => onAbort && onAbort());

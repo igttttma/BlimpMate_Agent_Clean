@@ -35364,6 +35364,28 @@ void main(void)\r
     };
   }
 
+  // src/xiaozhi/audio/max-volume.mjs
+  var MaxVolume = class extends EventTarget {
+    get #bridge() {
+      return globalThis.__nativeVolumeRaw;
+    }
+    /** Only the Android app has it. */
+    get available() {
+      return !!this.#bridge;
+    }
+    /** true | false, or null where there's no such setting. */
+    get value() {
+      return this.available ? !!this.#bridge.getMaxVolume() : null;
+    }
+    set(on) {
+      if (!this.available) return false;
+      this.#bridge.setMaxVolume(!!on);
+      this.dispatchEvent(new CustomEvent("change", { detail: !!on }));
+      return true;
+    }
+  };
+  var maxVolume = new MaxVolume();
+
   // src/shared-web/ui/chat-panel.mjs
   function createChatPanel({ onConnect, onDisconnect, onBackendApply, onBackendReset, onCallApply, onPress, onRelease, onAutoToggle, onAbort, onSendText, onModeChange }) {
     const toggle = document.createElement("button");
@@ -35565,21 +35587,17 @@ void main(void)\r
       callErrorEl.hidden = !error;
     });
     $2("xzDisconnect").addEventListener("click", () => onDisconnect && onDisconnect());
-    const volumeBridge = globalThis.__nativeVolumeRaw;
-    if (volumeBridge) {
+    if (maxVolume.available) {
       const on = $2("xzMaxVolumeOn");
       const off = $2("xzMaxVolumeOff");
       const show = (value) => {
         on.classList.toggle("xz-active", value);
         off.classList.toggle("xz-active", !value);
       };
-      const set = (value) => {
-        volumeBridge.setMaxVolume(value);
-        show(value);
-      };
-      on.addEventListener("click", () => set(true));
-      off.addEventListener("click", () => set(false));
-      show(volumeBridge.getMaxVolume());
+      on.addEventListener("click", () => maxVolume.set(true));
+      off.addEventListener("click", () => maxVolume.set(false));
+      maxVolume.addEventListener("change", (e2) => show(e2.detail));
+      show(maxVolume.value);
       $2("xzVolumeSection").hidden = false;
     }
     $2("xzAbort").addEventListener("click", () => onAbort && onAbort());
@@ -37970,6 +37988,8 @@ void main(void)\r
         loop: playback.loop,
         videos: videos.status(),
         avatar: avatarState(),
+        // Android app only; null elsewhere
+        max_volume: maxVolume.value,
         // Lists this Blimp in the portal (several can share one server)
         client: { user_agent: navigator.userAgent, platform: globalThis.hostInfo?.platform || "" }
       };
@@ -38021,6 +38041,9 @@ void main(void)\r
         if (!playback.resume()) log("info", "Portal resume ignored: nothing is paused");
       } else if (msg.type === "set_loop") {
         playback.setLoop(msg.loop === true);
+      } else if (msg.type === "set_max_volume") {
+        if (maxVolume.set(msg.on === true)) log("info", `Maximum volume ${msg.on === true ? "on" : "off"} (from the portal)`);
+        else log("info", "Portal maximum volume ignored: only the Android app has it");
       } else if (msg.type === "answer_call") {
         if (!callController?.answer("portal")) log("info", "Portal answer ignored: no call is ringing");
       } else if (msg.type === "decline_call") {
@@ -38070,6 +38093,7 @@ void main(void)\r
       }
     }, 500);
     playback.addEventListener("change", report);
+    maxVolume.addEventListener("change", report);
     videos.addEventListener("change", report);
     conversation.state.addEventListener("device", report);
     conversation.addEventListener("wake", report);

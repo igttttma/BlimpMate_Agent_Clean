@@ -37400,6 +37400,15 @@ void main(void)\r
 
   // src/remote-control/media-playback.mjs
   var ACTIVATION_WAIT_MS = 3e3;
+  function mustDownload(url2) {
+    if (globalThis.location?.protocol !== "https:") return false;
+    try {
+      const { protocol, hostname } = new URL(url2);
+      return protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+    } catch {
+      return false;
+    }
+  }
   var VIDEO_STYLE = `
 .bm-video { position: fixed; inset: 0; z-index: 800; background: #000; display: none; }
 .bm-video.on { display: block; }
@@ -37454,6 +37463,8 @@ void main(void)\r
       this.lipSync = new LipSync(conversation.mouth);
       this.screen = new VideoScreen();
       this._gen = 0;
+      this._download = null;
+      this._blobUrl = null;
       this._queue = Promise.resolve();
       this._takingOver = false;
       this._clickedAt = 0;
@@ -37486,6 +37497,22 @@ void main(void)\r
           this._takingOver = false;
         }
         if (gen !== this._gen) return;
+        if (mustDownload(url2)) {
+          const abort = new AbortController();
+          this._download = abort;
+          try {
+            const res = await fetch(url2, { signal: abort.signal });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const blob = await res.blob();
+            if (gen !== this._gen) return;
+            url2 = this._blobUrl = URL.createObjectURL(blob);
+          } catch (err) {
+            if (gen !== this._gen) return;
+            throw new Error(`download failed: ${err?.message || err}`);
+          } finally {
+            if (this._download === abort) this._download = null;
+          }
+        }
         let media;
         if (kind === "video") {
           media = this.screen.createVideo();
@@ -37603,6 +37630,12 @@ void main(void)\r
       media.onpause = () => mine() && !media.ended && this.playback.status === "playing" && this._end("stopped", { reason: "interrupted" });
     }
     _detach() {
+      this._download?.abort();
+      this._download = null;
+      if (this._blobUrl) {
+        URL.revokeObjectURL(this._blobUrl);
+        this._blobUrl = null;
+      }
       const media = this.media;
       this.media = null;
       if (!media) return;

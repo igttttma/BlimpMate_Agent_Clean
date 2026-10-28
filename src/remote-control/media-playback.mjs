@@ -20,6 +20,22 @@ import { LipSync } from "../xiaozhi/audio/lip-sync.mjs";
 
 const ACTIVATION_WAIT_MS = 3000;
 
+// An https page (the Android app's appassets origin) can't stream an http://
+// link into a media element: the WebView blocks it as mixed content (even with
+// MIXED_CONTENT_ALWAYS_ALLOW; it reports "Format error" and sends no request),
+// while fetch() of the same link works. Loopback is exempt, which is why the
+// emulator over adb reverse played fine. Such links are downloaded first and
+// played from a blob: URL (same origin, so the lip sync's Web Audio hears it).
+function mustDownload(url) {
+  if (globalThis.location?.protocol !== "https:") return false;
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
 const VIDEO_STYLE = `
 .bm-video { position: fixed; inset: 0; z-index: 800; background: #000; display: none; }
 .bm-video.on { display: block; }
@@ -80,6 +96,8 @@ export class MediaPlayback extends EventTarget {
     this.lipSync = new LipSync(conversation.mouth);
     this.screen = new VideoScreen();
     this._gen = 0;
+    this._download = null; // AbortController of an http clip being fetched
+    this._blobUrl = null; // that clip, revoked when it's detached
     this._queue = Promise.resolve();
     this._takingOver = false;
     this._clickedAt = 0;
@@ -112,6 +130,22 @@ export class MediaPlayback extends EventTarget {
       this._takingOver = true;
       try { await this._takeSpeaker(); } finally { this._takingOver = false; }
       if (gen !== this._gen) return;
+      if (mustDownload(url)) {
+        const abort = new AbortController();
+        this._download = abort;
+        try {
+          const res = await fetch(url, { signal: abort.signal });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          if (gen !== this._gen) return;
+          url = this._blobUrl = URL.createObjectURL(blob);
+        } catch (err) {
+          if (gen !== this._gen) return;
+          throw new Error(`download failed: ${err?.message || err}`);
+        } finally {
+          if (this._download === abort) this._download = null;
+        }
+      }
       let media;
       if (kind === "video") {
         media = this.screen.createVideo();
@@ -237,6 +271,12 @@ export class MediaPlayback extends EventTarget {
   }
 
   _detach() {
+    this._download?.abort();
+    this._download = null;
+    if (this._blobUrl) {
+      URL.revokeObjectURL(this._blobUrl);
+      this._blobUrl = null;
+    }
     const media = this.media;
     this.media = null;
     if (!media) return;

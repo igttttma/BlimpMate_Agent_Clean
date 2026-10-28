@@ -25,7 +25,12 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.Socket;
 import java.util.concurrent.TimeUnit;
+
+import javax.net.SocketFactory;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -100,7 +105,10 @@ public final class RemoteService extends Service {
         thread = new HandlerThread("remote");
         thread.start();
         handler = new Handler(thread.getLooper());
-        http = new OkHttpClient.Builder().pingInterval(15, TimeUnit.SECONDS).build();
+        http = new OkHttpClient.Builder()
+                .pingInterval(15, TimeUnit.SECONDS)
+                .socketFactory(new SmallSendBufferSocketFactory())
+                .build();
 
         // A new network: reconnect now instead of waiting out the backoff
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
@@ -444,6 +452,47 @@ public final class RemoteService extends Service {
         public void onFailure(WebSocket socket, Throwable t, Response response) {
             String reason = t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
             handler.post(() -> RemoteService.this.onClosed(socket, 1006, reason));
+        }
+    }
+
+    /**
+     * Sockets with a small send buffer. With the default one (megabytes on a
+     * slow link) a stream faster than the link piles up in the kernel, out of
+     * the session's sight: seconds of delay before the bitrate comes down.
+     * Small, the excess waits in OkHttp's queue, which backlog() reports.
+     */
+    private static final class SmallSendBufferSocketFactory extends SocketFactory {
+        private static final int SEND_BUFFER_BYTES = 64 * 1024;
+        private final SocketFactory base = SocketFactory.getDefault();
+
+        private static Socket small(Socket s) throws IOException {
+            s.setSendBufferSize(SEND_BUFFER_BYTES);
+            return s;
+        }
+
+        @Override
+        public Socket createSocket() throws IOException {
+            return small(base.createSocket());
+        }
+
+        @Override
+        public Socket createSocket(String host, int port) throws IOException {
+            return small(base.createSocket(host, port));
+        }
+
+        @Override
+        public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
+            return small(base.createSocket(host, port, localHost, localPort));
+        }
+
+        @Override
+        public Socket createSocket(InetAddress host, int port) throws IOException {
+            return small(base.createSocket(host, port));
+        }
+
+        @Override
+        public Socket createSocket(InetAddress address, int port, InetAddress localAddress, int localPort) throws IOException {
+            return small(base.createSocket(address, port, localAddress, localPort));
         }
     }
 }

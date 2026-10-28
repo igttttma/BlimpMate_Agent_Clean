@@ -28,6 +28,17 @@ final class ScreenSession {
     // More than this waiting in the connection: drop frames until a keyframe,
     // so the picture stays current instead of falling behind
     private static final long MAX_BACKLOG_BYTES = 1024 * 1024;
+    // More than this waiting on the direct path: it's slower than the server
+    // (some routes barely move data), so it's dropped for the rest of the session
+    private static final long MAX_P2P_BACKLOG_BYTES = 256 * 1024;
+    // Adaptive bitrate, checked every RATE_MS: frames dropped (here or by the
+    // server) or more than CONGESTED_BYTES waiting cuts it; RAISE_AFTER clear
+    // checks in a row (under CLEAR_BYTES waiting) raise it back toward the preset
+    private static final long RATE_MS = 1_000;
+    private static final long CONGESTED_BYTES = 128 * 1024;
+    private static final long CLEAR_BYTES = 16 * 1024;
+    private static final int RAISE_AFTER = 3;
+    private static final int MIN_KBPS = 300;
     // Packet header: flags, then the presentation time (see the stream server's screen.mjs)
     private static final int FLAG_CONFIG = 1;
     private static final int FLAG_KEY = 2;
@@ -78,16 +89,27 @@ final class ScreenSession {
     // Encoder thread: packets go over the direct path / switch to it at the next keyframe
     private volatile boolean usingP2P;
     private volatile boolean p2pPending;
+    // Set when the direct path couldn't keep up: the server carries the rest of the session
+    private volatile boolean p2pDropped;
     private Quality quality;
     private int[] frameSize;
     private boolean closed;
     // Encoder thread: set after frames were dropped, cleared by the next keyframe
     private volatile boolean waitKey;
     private volatile int framesSent;
+    private volatile int framesDropped;
     private volatile long bytesSent;
     private int lastFrames;
+    private int lastDropped;
     private long lastBytes;
     private long lastStatsAt;
+    // Adaptive bitrate: the encoder's current target, and what the last check saw
+    private int kbps;
+    private int rateDropped;
+    private int serverDrops;
+    private int clearChecks;
+    private long rateBytes;
+    private long rateBacklog;
 
     ScreenSession(Context context, Handler thread, MediaProjection projection, String preset,
                   JSONArray iceServers, Listener listener) {
@@ -117,7 +139,7 @@ final class ScreenSession {
 
             @Override
             public void onOpenChanged(boolean open) {
-                if (closed) return;
+                if (closed || p2pDropped) return;
                 if (open) {
                     // Switch with a keyframe, so the viewer can start decoding from it
                     p2pPending = true;
@@ -135,12 +157,14 @@ final class ScreenSession {
         p2p.start();
         lastStatsAt = SystemClock.elapsedRealtime();
         thread.postDelayed(statsTick, STATS_MS);
+        thread.postDelayed(rateTick, RATE_MS);
     }
 
     void close() {
         if (closed) return;
         closed = true;
         thread.removeCallbacks(statsTick);
+        thread.removeCallbacks(rateTick);
         encoder.release();
         p2p.close();
     }
@@ -158,16 +182,20 @@ final class ScreenSession {
         restartEncoder();
     }
 
-    /** The viewer (or the server, for a viewer that fell behind) needs a keyframe. */
+    /** The server dropped frames for a viewer that fell behind and needs a keyframe. */
     void requestKeyFrame() {
-        if (!closed) encoder.requestKeyFrame();
+        if (closed) return;
+        serverDrops++;
+        encoder.requestKeyFrame();
     }
 
     private void restartEncoder() {
         frameSize = computeFrameSize();
         waitKey = false;
+        kbps = quality.kbps;
+        clearChecks = 0;
         try {
-            encoder.start(frameSize[0], frameSize[1], quality.fps, quality.kbps * 1000);
+            encoder.start(frameSize[0], frameSize[1], quality.fps, kbps * 1000);
         } catch (Exception e) {
             Log.w(TAG, "encoder start failed", e);
             listener.onFailed("Couldn't start the screen encoder: " + e.getMessage());
@@ -184,9 +212,14 @@ final class ScreenSession {
             usingP2P = true;
         }
         boolean direct = usingP2P;
+        if (direct && p2p.buffered() > MAX_P2P_BACKLOG_BYTES) {
+            dropP2P();
+            direct = false;
+        }
         long backlog = direct ? p2p.buffered() : listener.backlog();
         boolean essential = config || key;
         if (!essential && (waitKey || backlog > MAX_BACKLOG_BYTES)) {
+            framesDropped++;
             if (!waitKey) {
                 waitKey = true;
                 encoder.requestKeyFrame();
@@ -212,6 +245,59 @@ final class ScreenSession {
         }
     }
 
+    // The direct path fell behind: back through the server from a keyframe, and
+    // close the channel so the viewer takes the server's packets again
+    private void dropP2P() {
+        Log.i(TAG, "direct path too slow (" + p2p.buffered() / 1024 + " KB waiting); using the server");
+        p2pDropped = true;
+        p2pPending = false;
+        usingP2P = false;
+        waitKey = true;
+        encoder.requestKeyFrame();
+        thread.post(p2p::close);
+    }
+
+    // ---- adaptive bitrate ----
+
+    // A fixed bitrate on a slower link only drops frames until the next
+    // keyframe (stutter); a lower bitrate keeps every frame, a bit blurrier
+    private final Runnable rateTick = new Runnable() {
+        @Override
+        public void run() {
+            if (closed) return;
+            int dropped = framesDropped;
+            long bytes = bytesSent;
+            long backlog = usingP2P ? p2p.buffered() : listener.backlog();
+            // What the link carried since the last check: what went in, less what piled up
+            int drainedKbps = (int) Math.max(0, (bytes - rateBytes - (backlog - rateBacklog)) * 8 / RATE_MS);
+            boolean shrinking = backlog < rateBacklog;
+            boolean congested = dropped != rateDropped || serverDrops > 0 || backlog > CONGESTED_BYTES;
+            rateDropped = dropped;
+            rateBytes = bytes;
+            rateBacklog = backlog;
+            serverDrops = 0;
+            int next = kbps;
+            if (congested) {
+                clearChecks = 0;
+                // Just under what the link carries; not again while the backlog drains
+                if (!shrinking) {
+                    int fit = drainedKbps > 0 ? drainedKbps * 85 / 100 : kbps / 2;
+                    next = Math.max(MIN_KBPS, Math.min(kbps * 85 / 100, fit));
+                }
+            } else if (backlog < CLEAR_BYTES && kbps < quality.kbps && ++clearChecks >= RAISE_AFTER) {
+                clearChecks = 0;
+                next = Math.min(quality.kbps, kbps * 5 / 4);
+            }
+            if (next != kbps) {
+                Log.i(TAG, "bitrate " + kbps + " -> " + next + " kbps (backlog " + backlog / 1024
+                        + " KB, link " + drainedKbps + " kbps)");
+                kbps = next;
+                encoder.setBitRate(kbps * 1000);
+            }
+            thread.postDelayed(this, RATE_MS);
+        }
+    };
+
     // ---- stats for the viewer ----
 
     private final Runnable statsTick = new Runnable() {
@@ -221,6 +307,7 @@ final class ScreenSession {
             long now = SystemClock.elapsedRealtime();
             double seconds = Math.max(0.001, (now - lastStatsAt) / 1000.0);
             int frames = framesSent;
+            int dropped = framesDropped;
             long bytes = bytesSent;
             try {
                 listener.sendToViewer(new JSONObject()
@@ -228,9 +315,14 @@ final class ScreenSession {
                         .put("encoder", encoder.encoderName())
                         .put("path", usingP2P ? "p2p" : "relay")
                         .put("fps", Math.round((frames - lastFrames) / seconds))
+                        // frames skipped because the connection was backed up
+                        .put("dropped", Math.round((dropped - lastDropped) / seconds))
+                        .put("backlogKB", (usingP2P ? p2p.buffered() : listener.backlog()) / 1024)
+                        .put("targetKbps", kbps)
                         .put("kbps", Math.round((bytes - lastBytes) * 8 / 1000.0 / seconds)));
             } catch (Exception ignored) {}
             lastFrames = frames;
+            lastDropped = dropped;
             lastBytes = bytes;
             lastStatsAt = now;
             thread.postDelayed(this, STATS_MS);

@@ -23,11 +23,22 @@ permission on every session, which this agent doesn't handle.
   is still. Capture stops when the viewer leaves; the status bar's cast icon
   shows while someone watches, and the screen is kept on.
 - The video packets and the viewer's input share the one WebSocket to the stream
-  server, which passes them on; the viewer decodes with WebCodecs. When the
-  connection backs up, frames are dropped until the next keyframe.
+  server, which passes them on; the viewer decodes with WebCodecs.
+- Adaptive bitrate: every second the session checks the connection. When data
+  piles up (or frames were dropped here or by the server), the bitrate goes
+  down to just under what the link carried; after a few clear seconds it steps
+  back up toward the preset's. A slow link then gets a softer picture at full
+  frame rate instead of stutter. The socket's send buffer is kept small (64 KB)
+  so the backlog shows within a second instead of hiding in the kernel. If the
+  connection still backs up a lot, frames are dropped until the next keyframe.
+  Allwinner's encoder makes a keyframe every 30 frames whatever the settings
+  (its interval only changes together with B-frames).
 - Meanwhile `P2PLink` tries a direct path: a WebRTC data channel to the viewer
   (only the data channel; the video stays this encoder's). When it opens, the
   packets go there from the next keyframe; if it closes, back through the server.
+  Some routes open a channel that barely moves data (seen through a PC's VPN):
+  when more than 256 KB waits on it, the agent closes it and the server carries
+  the rest of the session.
 - Input goes through the accessibility service `InputService`: gestures
   (replayed with their timing), Back/Home/Recents/Notifications, and text typed
   into the focused field (native fields and web pages).
@@ -47,6 +58,8 @@ stream-server), not a rebuild.
 ## One-time setup on the device (adb)
 
 The setup screen (open "BlimpMate Remote") shows each item with its command.
+Run the commands in this order: the first one opens the app, and Android only
+binds the accessibility service of an app that has been opened.
 
 ```
 # Server address (or type it into the setup screen)
@@ -77,6 +90,28 @@ The app must have been opened once (any install leaves it "stopped" until then)
 before Android delivers the boot broadcast to it. Settings above survive reboots
 and app updates.
 
+**Allwinner boards** (seen on an Orange Pi Zero 3W, A733): the vendor's
+background manager (`awbms`, `/vendor/etc/awbms_config` with `skipService: true`)
+blocks apps outside its whitelist from running in the background: at boot it
+stops the agent and the accessibility service (`logcat`: `awbms skipService`),
+and it force-stops the agent a few minutes after it goes to the background.
+Allow the app in the vendor's own screen, once:
+
+```
+adb shell am start -n com.softwinner.awmanager/.AwManager
+# "Background Manage": switch "BlimpMate Remote" to Allowed
+```
+
+Then reboot, or open the app and rerun the accessibility commands above (a
+force stop unbinds the service). Check with `adb shell dumpsys background
+whitelist` (User Whitelist lists `com.blimpmate.remote`). Don't hand-write
+`/data/system/awbms_config`: the screen saves the whole config there, and a file
+with only a `whitelist:` section replaces the system whitelist and crashes the
+system at boot (an Orange Pi had to be reflashed).
+
+These boards have no clock battery: until the time syncs after a boot, the
+server certificate looks not yet valid and the agent retries until it connects.
+
 Note: `enabled_accessibility_services` is a list. If the device already has
 other accessibility services, append ours with a `:` separator instead of
 replacing the list.
@@ -86,4 +121,5 @@ replacing the list.
 Click to tap, hold to long-press, drag to swipe, scroll wheel to scroll.
 Right-click is Back, middle-click is Home. Click the screen, then type (Backspace
 and Enter work); paste works too. Toolbar: Back, Home, Recents, Notifications,
-Blimp app, Enter, quality (Low 480p/15 fps, Medium 720p/30 fps, High 1080p/30 fps).
+Blimp app, Enter, quality (up to: Low 480p/30 fps 1 Mbps, Medium 720p/60 fps
+4 Mbps, High 1080p/60 fps 8 Mbps).

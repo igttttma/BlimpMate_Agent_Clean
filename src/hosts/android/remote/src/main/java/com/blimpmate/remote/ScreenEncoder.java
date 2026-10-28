@@ -97,6 +97,17 @@ final class ScreenEncoder {
         } catch (IllegalStateException ignored) {}
     }
 
+    /** Changes the bitrate on the fly (the connection backed up, or cleared). */
+    void setBitRate(int bitRate) {
+        MediaCodec c = codec;
+        if (c == null) return;
+        Bundle params = new Bundle();
+        params.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitRate);
+        try {
+            c.setParameters(params);
+        } catch (IllegalStateException ignored) {}
+    }
+
     /** Stops encoding; the virtual display is kept for a restart. */
     void stop() {
         running = false;
@@ -165,6 +176,7 @@ final class ScreenEncoder {
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 60);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED);
+        // Not every encoder honors it: Allwinner's keeps a keyframe every 30 frames
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL_S);
         // display the very first frame, and recover from bad quality when no new frames
         format.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, REPEAT_FRAME_DELAY_US);

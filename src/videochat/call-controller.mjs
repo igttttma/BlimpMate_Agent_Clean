@@ -12,15 +12,19 @@ import { signalingUrl } from "./call-config.mjs";
 
 const BLIMP_MEDIA = {
   audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-  // The Blimp display and camera are 16:9 landscape
+  // The Blimp display and camera are 16:9 landscape. Capped at 1080p: without a
+  // max the camera may hand over a larger mode than the encoder keeps up with
   video: {
     facingMode: "user",
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
+    width: { ideal: 1920, max: 1920 },
+    height: { ideal: 1080, max: 1080 },
     aspectRatio: { ideal: 16 / 9 },
-    frameRate: { ideal: 24 }
+    frameRate: { ideal: 24, max: 30 }
   }
 };
+// H.264 goes to the hardware encoder (MediaCodec) on Android; VP8 is software there
+const BLIMP_VIDEO_CODEC = "video/H264";
+const BLIMP_VIDEO_MAX_BITRATE = 4_000_000;
 
 const END_MESSAGES = {
   declined: "Call declined",
@@ -89,7 +93,9 @@ export class CallController extends EventTarget {
     }
     const client = new CallClient({
       url,
-      getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA)
+      getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA),
+      preferVideoCodec: BLIMP_VIDEO_CODEC,
+      maxVideoBitrate: BLIMP_VIDEO_MAX_BITRATE
     });
     this.client = client;
     client.addEventListener("status", (e) => {

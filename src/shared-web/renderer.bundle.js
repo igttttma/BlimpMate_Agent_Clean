@@ -36452,11 +36452,15 @@ void main(void)\r
      * @param {string} opts.url  wss://host/ws?role=remote  (or role=blimp&token=…)
      * @param {() => Promise<MediaStream>} [opts.getMedia]  override media capture
      * @param {number} [opts.disconnectGraceMs]  end the call after ICE stays disconnected this long
+     * @param {string} [opts.preferVideoCodec]  e.g. "video/H264": negotiated first when both sides have it
+     * @param {number} [opts.maxVideoBitrate]  cap for the outgoing video, bits/s (browser default otherwise)
      */
-    constructor({ url: url2, getMedia, disconnectGraceMs = 1e4 }) {
+    constructor({ url: url2, getMedia, disconnectGraceMs = 1e4, preferVideoCodec, maxVideoBitrate }) {
       super();
       this.url = url2;
       this.getMedia = getMedia || (() => navigator.mediaDevices.getUserMedia(DEFAULT_MEDIA));
+      this.preferVideoCodec = preferVideoCodec;
+      this.maxVideoBitrate = maxVideoBitrate;
       this.disconnectGraceMs = disconnectGraceMs;
       this.ws = null;
       this.connected = false;
@@ -36621,11 +36625,39 @@ void main(void)\r
         const stream = await this.ensureMedia();
         if (this.pc !== pc) return;
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
+        await this._tuneVideo(pc);
       })();
       await this._peerReady;
       if (offerer && this.pc === pc) {
         await pc.setLocalDescription(await pc.createOffer());
         this._send({ type: "signal", data: { description: pc.localDescription.toJSON() } });
+      }
+    }
+    /** Codec order and bitrate cap for the outgoing video; best effort (older WebViews lack parts of it). */
+    async _tuneVideo(pc) {
+      const transceiver = pc.getTransceivers().find((t2) => t2.sender.track?.kind === "video");
+      if (!transceiver) return;
+      const mime = this.preferVideoCodec?.toLowerCase();
+      if (mime && transceiver.setCodecPreferences && RTCRtpReceiver.getCapabilities) {
+        const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
+        const preferred = codecs.filter((c2) => c2.mimeType.toLowerCase() === mime);
+        if (preferred.length) {
+          try {
+            transceiver.setCodecPreferences([...preferred, ...codecs.filter((c2) => !preferred.includes(c2))]);
+          } catch (err) {
+            this._emit("error", { error: `codec: ${err?.message || err}` });
+          }
+        }
+      }
+      if (this.maxVideoBitrate) {
+        try {
+          const params = transceiver.sender.getParameters();
+          if (!params.encodings?.length) params.encodings = [{}];
+          params.encodings[0].maxBitrate = this.maxVideoBitrate;
+          await transceiver.sender.setParameters(params);
+        } catch (err) {
+          this._emit("error", { error: `bitrate: ${err?.message || err}` });
+        }
       }
     }
     async _onSignal(data) {
@@ -36935,15 +36967,18 @@ void main(void)\r
   // src/videochat/call-controller.mjs
   var BLIMP_MEDIA = {
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    // The Blimp display and camera are 16:9 landscape
+    // The Blimp display and camera are 16:9 landscape. Capped at 1080p: without a
+    // max the camera may hand over a larger mode than the encoder keeps up with
     video: {
       facingMode: "user",
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: 1920, max: 1920 },
+      height: { ideal: 1080, max: 1080 },
       aspectRatio: { ideal: 16 / 9 },
-      frameRate: { ideal: 24 }
+      frameRate: { ideal: 24, max: 30 }
     }
   };
+  var BLIMP_VIDEO_CODEC = "video/H264";
+  var BLIMP_VIDEO_MAX_BITRATE = 4e6;
   var END_MESSAGES = {
     declined: "Call declined",
     cancelled: "Call cancelled",
@@ -37008,7 +37043,9 @@ void main(void)\r
       }
       const client = new CallClient({
         url: url2,
-        getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA)
+        getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA),
+        preferVideoCodec: BLIMP_VIDEO_CODEC,
+        maxVideoBitrate: BLIMP_VIDEO_MAX_BITRATE
       });
       this.client = client;
       client.addEventListener("status", (e2) => {

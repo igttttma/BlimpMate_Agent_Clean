@@ -16,6 +16,7 @@ src/hosts/android/.gradle/
 src/hosts/android/build/
 src/hosts/android/app/build/
 src/hosts/android/remote/build/
+src/hosts/android/speaker/build/
 src/hosts/android/local.properties
 src/hosts/android/app/src/main/assets/
 

@@ -26,7 +26,8 @@ public final class SetupActivity extends Activity {
     private final Runnable refresh = new Runnable() {
         @Override
         public void run() {
-            status.setText(SpeakerService.status);
+            MediaCache cache = SpeakerService.cache;
+            status.setText(SpeakerService.status + (cache != null ? "\n" + cache.summary() : ""));
             main.postDelayed(this, 1000);
         }
     };

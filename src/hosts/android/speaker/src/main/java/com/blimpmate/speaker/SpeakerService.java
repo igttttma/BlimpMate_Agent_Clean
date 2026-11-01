@@ -22,6 +22,7 @@ import android.util.Log;
 
 import org.json.JSONObject;
 
+import java.io.File;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -47,6 +48,7 @@ public final class SpeakerService extends Service {
 
     /** Shown by the setup screen. */
     static volatile String status = "Stopped";
+    static volatile MediaCache cache;
 
     private final OkHttpClient http = new OkHttpClient.Builder()
             .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -98,6 +100,7 @@ public final class SpeakerService extends Service {
         thread.start();
         handler = new Handler(thread.getLooper());
         voice = new VoicePlayer();
+        cache = new MediaCache(this, http);
     }
 
     @Override
@@ -218,6 +221,9 @@ public final class SpeakerService extends Service {
                 case "tts":
                     if ("stop".equals(msg.optString("state")) && msg.optBoolean("interrupted")) voice.flush();
                     break;
+                case "library":
+                    cache.sync(msg, host);
+                    break;
                 case "play":
                     playClip(msg);
                     break;
@@ -242,11 +248,13 @@ public final class SpeakerService extends Service {
         }
     }
 
-    /** A portal clip or a video's soundtrack, streamed from the server's media link. */
+    /** A portal clip or a video's soundtrack: the prefetched copy, else streamed from the server. */
     private void playClip(JSONObject msg) {
         stopClip();
-        String url = "http://" + host + ":" + msg.optInt("http_port", 8003) + msg.optString("path");
-        String title = msg.optString("title", "clip");
+        File local = cache.get(msg.optString("id"), 0);
+        String url = local != null ? local.getAbsolutePath()
+                : "http://" + host + ":" + msg.optInt("http_port", 8003) + msg.optString("path");
+        String title = msg.optString("title", "clip") + (local != null ? " (cached)" : " (streaming)");
         MediaPlayer player = new MediaPlayer();
         clip = player;
         try {

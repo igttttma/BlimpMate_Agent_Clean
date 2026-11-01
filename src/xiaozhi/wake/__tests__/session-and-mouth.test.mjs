@@ -1,26 +1,7 @@
 import assert from "node:assert/strict";
-import { registerSessionControlTools } from "../../mcp/tools/session-control.mjs";
 import { MouthDriver } from "../../conversation/mouth-driver.mjs";
 import { Live2DControlCore, ExpressionType } from "../../../core/live2d-control-core.mjs";
 import { createLocalHostBridge } from "../../../bridge/host-bridge.mjs";
-
-async function testSessionEndTool() {
-  let tool = null;
-  let ended = null;
-  const server = {
-    registerTool(definition) { tool = definition; }
-  };
-  registerSessionControlTools(server, {
-    endSession: ({ reason }) => { ended = reason; }
-  });
-
-  assert.equal(tool.name, "session.end");
-  const result = tool.handler({ reason: "user_said_goodbye" });
-  assert.equal(result.success, true);
-  assert.equal(result.action, "session.end");
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.equal(ended, "user_said_goodbye");
-}
 
 async function testMouthWatchdogClosesOnSilence() {
   const values = [];
@@ -124,7 +105,6 @@ function testReplyExpressionSkippedWhileToolExpressionPlays() {
   assert.equal(core.targetExpression, ExpressionType.None);
 }
 
-await testSessionEndTool();
 await testMouthWatchdogClosesOnSilence();
 testExpressionCannotOpenSilentMouth();
 testDefaultMouthGainAndLimit();

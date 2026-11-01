@@ -31,10 +31,9 @@ export class Conversation extends EventTarget {
         ...(detail || {})
       });
     });
-    registerAllTools(this.mcp, bridge, {
-      // The AI ends the conversation; the link stays for the next one
-      endSession: () => this.endSession({ disconnect: false })
-    });
+    // Ending the conversation is the server's job (its exit tool and idle timeout
+    // send "goodbye"), so the AI has one way to do it
+    registerAllTools(this.mcp, bridge);
 
     this.protocol = null;
     this.encoder = null;
@@ -661,7 +660,12 @@ export class Conversation extends EventTarget {
     } else if (type === "mcp") {
       if (msg.payload) this.mcp.handleIncoming(msg.payload);
     } else if (type === "goodbye") {
-      this.disconnect();
+      // The server ended the conversation (the user said bye, or nobody spoke for a
+      // while). Let the farewell play out, then wait for the wake word; the link stays.
+      this._autoSessionActive = false;
+      (this.player ? this.player.drained() : Promise.resolve())
+        .then(() => this.endSession({ disconnect: false }))
+        .catch((e) => console.warn("[session] goodbye failed:", e));
     }
   }
 

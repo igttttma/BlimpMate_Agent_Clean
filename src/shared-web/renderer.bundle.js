@@ -34512,36 +34512,6 @@ void main(void)\r
     });
   }
 
-  // src/xiaozhi/mcp/tools/session-control.mjs
-  function registerSessionControlTools(server, { endSession } = {}) {
-    if (typeof endSession !== "function") return;
-    server.registerTool({
-      name: "session.end",
-      description: "End the current conversation and return the device to offline wake-word mode. Call this when the user says goodbye, bye, see you, asks to stop talking, or otherwise clearly ends the conversation.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          reason: {
-            type: "string",
-            description: "Short reason for ending the conversation, such as user_said_goodbye"
-          }
-        }
-      },
-      handler: ({ reason = "assistant_requested" } = {}) => {
-        setTimeout(() => {
-          Promise.resolve(endSession({ reason })).catch(() => {
-          });
-        }, 250);
-        return {
-          success: true,
-          action: "session.end",
-          message: "Conversation is ending; the device will return to wake-word mode.",
-          reason
-        };
-      }
-    });
-  }
-
   // src/xiaozhi/mcp/tools/camera.mjs
   var MAX_SIDE = 768;
   var JPEG_QUALITY = 0.75;
@@ -34605,9 +34575,8 @@ void main(void)\r
   }
 
   // src/xiaozhi/mcp/tools/index.mjs
-  function registerAllTools(mcp, bridge, sessionControl = {}) {
+  function registerAllTools(mcp, bridge) {
     registerSelfControlTools(mcp, bridge);
-    registerSessionControlTools(mcp, sessionControl);
     registerCameraTools(mcp);
   }
 
@@ -34631,10 +34600,7 @@ void main(void)\r
           ...detail || {}
         });
       });
-      registerAllTools(this.mcp, bridge, {
-        // The AI ends the conversation; the link stays for the next one
-        endSession: () => this.endSession({ disconnect: false })
-      });
+      registerAllTools(this.mcp, bridge);
       this.protocol = null;
       this.encoder = null;
       this.decoder = null;
@@ -35202,7 +35168,8 @@ void main(void)\r
       } else if (type === "mcp") {
         if (msg.payload) this.mcp.handleIncoming(msg.payload);
       } else if (type === "goodbye") {
-        this.disconnect();
+        this._autoSessionActive = false;
+        (this.player ? this.player.drained() : Promise.resolve()).then(() => this.endSession({ disconnect: false })).catch((e2) => console.warn("[session] goodbye failed:", e2));
       }
     }
     _onAudio(bytes) {

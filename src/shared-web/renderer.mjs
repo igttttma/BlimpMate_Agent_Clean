@@ -14,6 +14,7 @@ import { createWakeProvider, WakeCoordinator } from "../xiaozhi/wake/wake-coordi
 import { ReadyKeeper } from "../xiaozhi/conversation/ready-keeper.mjs";
 import { CallController } from "../videochat/call-controller.mjs";
 import { loadCallConfig, saveCallConfig, validateCallConfig } from "../videochat/call-config.mjs";
+import { cameraView } from "../videochat/camera-view.mjs";
 import { registerVideoCallTools } from "../xiaozhi/mcp/tools/video-call.mjs";
 import { startRemoteControl } from "../remote-control/index.mjs";
 
@@ -637,6 +638,7 @@ const chatPanel = createChatPanel({
     if (error) return error;
     const saved = saveCallConfig(window.hostBridge.storage, cfg);
     window.__xz?.callController?.configure(saved);
+    cameraView.configure(saved);
     return null;
   },
   onDisconnect: async () => {
@@ -1052,6 +1054,9 @@ if (window.hostBridge && window.hostBridge.storage) {
     const callConfig = loadCallConfig(window.hostBridge.storage);
     chatPanel.setCallConfig(callConfig);
     callController.configure(callConfig);
+    // Live camera view (/camera on the same stream server; Android only)
+    cameraView.configure(callConfig);
+    window.__xz.cameraView = cameraView;
 
     // --- Server portal control (online status, "play now") ---------------
     window.__xz.remoteControl = startRemoteControl({

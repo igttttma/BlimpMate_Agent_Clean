@@ -1,12 +1,18 @@
 // Camera tool: the LLM calls it when it needs to see. The photo goes back as an
 // MCP image block in the tool result; the server attaches it to the conversation
 // for the (multimodal) main LLM, so there is no separate upload or vision model.
+import { cameraView } from "../../../videochat/camera-view.mjs";
 
 const MAX_SIDE = 768; // px; enough for a multimodal LLM, keeps the WS message small
 const JPEG_QUALITY = 0.75;
 const SETTLE_MS = 500; // let auto exposure / focus settle before grabbing a frame
 
-export async function capturePhoto({ facing = "user", maxSide = MAX_SIDE } = {}) {
+export async function capturePhoto(opts = {}) {
+  // The live camera view lets go of the camera for the photo, and gets it back after
+  return cameraView.withCamera("photo", () => grabPhoto(opts));
+}
+
+async function grabPhoto({ facing = "user", maxSide = MAX_SIDE } = {}) {
   const media = globalThis.navigator?.mediaDevices;
   if (!media?.getUserMedia) throw new Error("Camera is not available on this device");
   const stream = await media.getUserMedia({

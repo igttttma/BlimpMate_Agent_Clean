@@ -37,6 +37,7 @@ public final class MainActivity extends Activity {
     private WakeWordBridge wakeWordBridge;
     private WsBridge wsBridge;
     private CallModeVolume callModeVolume;
+    private CameraView cameraView;
     private PermissionRequest pendingPermissionRequest;
     private String remoteDisplayUrl;
     private boolean isKioskMode;
@@ -86,13 +87,16 @@ public final class MainActivity extends Activity {
             callModeVolume = new CallModeVolume(this);
             webView.addJavascriptInterface(callModeVolume, "__nativeVolumeRaw");
             callModeVolume.start();
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    new String[] { Manifest.permission.RECORD_AUDIO },
-                    REQ_RECORD_AUDIO
-                );
+            // Live camera view for the stream server's /camera page (lowest priority camera user)
+            cameraView = new CameraView(this);
+            webView.addJavascriptInterface(cameraView, "__nativeCameraViewRaw");
+            // Mic (wake word) and camera (photo tool, calls, camera view) up front
+            List<String> needed = new ArrayList<>();
+            for (String p : new String[] { Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA }) {
+                if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) needed.add(p);
+            }
+            if (!needed.isEmpty()) {
+                ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), REQ_RECORD_AUDIO);
             }
         }
 
@@ -116,6 +120,7 @@ public final class MainActivity extends Activity {
                     // A reload (e.g. after changing the backend) leaves the old
                     // page's sockets open; the new page can't reach them.
                     if (wsBridge != null) wsBridge.closeAll();
+                    if (cameraView != null) cameraView.onPageStarted();
                     view.evaluateJavascript(NATIVE_WS_GLUE + NATIVE_WAKE_WORD_GLUE, null);
                 }
             }
@@ -248,8 +253,24 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (cameraView != null) cameraView.onForeground(true);
+    }
+
+    @Override
+    protected void onPause() {
+        if (cameraView != null) cameraView.onForeground(false);
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         reloadHandler.removeCallbacksAndMessages(null);
+        if (cameraView != null) {
+            cameraView.shutdown();
+            cameraView = null;
+        }
         if (callModeVolume != null) {
             callModeVolume.stop();
             callModeVolume = null;

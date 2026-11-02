@@ -1,13 +1,15 @@
 import { CallClient } from "./call-client.mjs";
 import { CallView } from "./call-view.mjs";
 import { signalingUrl } from "./call-config.mjs";
+import { cameraView } from "./camera-view.mjs";
 
 // Video calls on the Blimp, voice-only and kept simple:
 //   idle     the agent owns the mic (wake word "Hey Blimp" → conversation)
 //   ringing  incoming call: the xiaozhi session is closed, Blimp rings, and the
 //            wake-word engine listens for "answer"
 //   calling  outgoing call: ringback; "Hey Blimp" cancels
-//   in_call  WebRTC owns mic, camera and speaker; no wake word
+//   in_call  WebRTC owns mic, camera and speaker; no wake word (the live
+//            camera view lets go of the camera until the call ends)
 // Any end of a call hands the mic back to the agent's wake word.
 
 const BLIMP_MEDIA = {
@@ -59,6 +61,7 @@ export class CallController extends EventTarget {
       onEnd: () => this.end("touch")
     });
     this._ownsAudio = false;
+    this._cameraHold = null;
     this._stopKeywords = null;
     this._queue = Promise.resolve();
   }
@@ -82,6 +85,7 @@ export class CallController extends EventTarget {
       this.client.close();
       this.client = null;
     }
+    this._releaseCamera();
     this._setState("off");
     if (!cfg?.url) return;
     let url;
@@ -93,7 +97,10 @@ export class CallController extends EventTarget {
     }
     const client = new CallClient({
       url,
-      getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA),
+      getMedia: async () => {
+        await this._holdCamera();
+        return navigator.mediaDevices.getUserMedia(BLIMP_MEDIA);
+      },
       preferVideoCodec: BLIMP_VIDEO_CODEC,
       maxVideoBitrate: BLIMP_VIDEO_MAX_BITRATE
     });
@@ -231,7 +238,23 @@ export class CallController extends EventTarget {
     this._setState(this.client?.connected ? "idle" : "off");
     this.view.setRemoteStream(null);
     this.view.ended(message);
+    this._releaseCamera();
     await this._releaseAudio();
+  }
+
+  // ---- camera: taken from the live camera view for the call ----
+
+  async _holdCamera() {
+    if (this._cameraHold) return;
+    this._cameraHold = cameraView.hold("call");
+    await this._cameraHold;
+  }
+
+  _releaseCamera() {
+    const hold = this._cameraHold;
+    if (!hold) return;
+    this._cameraHold = null;
+    hold.then((id) => cameraView.release(id));
   }
 
   // ---- audio ownership ----

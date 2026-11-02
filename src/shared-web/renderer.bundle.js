@@ -368,13 +368,13 @@
         return a2.x - b2.x;
       }
       function eliminateHole(hole, outerNode) {
-        var bridge = findHoleBridge(hole, outerNode);
-        if (!bridge) {
+        var bridge2 = findHoleBridge(hole, outerNode);
+        if (!bridge2) {
           return outerNode;
         }
-        var bridgeReverse = splitPolygon(bridge, hole);
+        var bridgeReverse = splitPolygon(bridge2, hole);
         filterPoints(bridgeReverse, bridgeReverse.next);
-        return filterPoints(bridge, bridge.next);
+        return filterPoints(bridge2, bridge2.next);
       }
       function findHoleBridge(hole, outerNode) {
         var p2 = outerNode, hx = hole.x, hy = hole.y, qx = -Infinity, m2;
@@ -33702,8 +33702,8 @@ void main(void)\r
 
   // src/xiaozhi/conversation/mouth-driver.mjs
   var MouthDriver = class {
-    constructor(bridge, { gain = 6, maxOpen = 0.7, smoothing = 0.5, floor = 0.02, watchdogMs = 650 } = {}) {
-      this.bridge = bridge;
+    constructor(bridge2, { gain = 6, maxOpen = 0.7, smoothing = 0.5, floor = 0.02, watchdogMs = 650 } = {}) {
+      this.bridge = bridge2;
       this.gain = gain;
       this.maxOpen = Math.min(1, Math.max(0, maxOpen));
       this.smoothing = smoothing;
@@ -34440,7 +34440,7 @@ void main(void)\r
   }
 
   // src/xiaozhi/mcp/tools/self-control.mjs
-  function registerSelfControlTools(server, bridge) {
+  function registerSelfControlTools(server, bridge2) {
     const expressionNames = Object.values(ExpressionType);
     server.registerTool({
       name: "self.list_expressions",
@@ -34463,7 +34463,7 @@ void main(void)\r
         if (!expressionNames.includes(name)) {
           throw new Error(`Unknown expression: ${name}`);
         }
-        bridge.setExpression(name, !!immediate);
+        bridge2.setExpression(name, !!immediate);
         return `Expression set to ${name}`;
       }
     });
@@ -34479,7 +34479,7 @@ void main(void)\r
         required: ["emotion"]
       },
       handler: ({ emotion, immediate }) => {
-        bridge.setEmotion(emotion, !!immediate);
+        bridge2.setEmotion(emotion, !!immediate);
         return `Emotion set to ${emotion}`;
       }
     });
@@ -34491,7 +34491,7 @@ void main(void)\r
         properties: { immediate: { type: "boolean" } }
       },
       handler: ({ immediate } = {}) => {
-        bridge.clearExpression(!!immediate);
+        bridge2.clearExpression(!!immediate);
         return "Expression cleared";
       }
     });
@@ -34500,7 +34500,7 @@ void main(void)\r
       description: "Make the avatar blink once.",
       inputSchema: { type: "object", properties: {} },
       handler: () => {
-        bridge.triggerBlink();
+        bridge2.triggerBlink();
         return "Blinked";
       }
     });
@@ -34508,15 +34508,105 @@ void main(void)\r
       name: "self.get_state",
       description: "Return current avatar state snapshot (expression, eye position, mouth).",
       inputSchema: { type: "object", properties: {} },
-      handler: () => bridge.getSnapshot()
+      handler: () => bridge2.getSnapshot()
     });
   }
+
+  // src/videochat/call-config.mjs
+  var STORAGE_KEY = "blimpmate.videochat_v1";
+  var BLIMP_PASSWORD = "blimpmate";
+  function normalizeCallConfig(cfg) {
+    let url2 = typeof cfg?.url === "string" ? cfg.url.trim() : "";
+    if (/^https?:\/\//i.test(url2)) {
+      const u2 = new URL(url2);
+      u2.protocol = u2.protocol === "https:" ? "wss:" : "ws:";
+      if (u2.pathname === "/" || u2.pathname === "") u2.pathname = "/ws";
+      url2 = u2.toString();
+    }
+    return { url: url2 };
+  }
+  function validateCallConfig(cfg) {
+    const { url: url2 } = normalizeCallConfig(cfg);
+    if (url2 && !/^wss?:\/\/\S+$/i.test(url2)) return "Use wss://host:port/ws (or the https:// page address).";
+    return null;
+  }
+  function loadCallConfig(storage) {
+    const raw = storage?.get?.(STORAGE_KEY);
+    if (raw) {
+      try {
+        const cfg = normalizeCallConfig(typeof raw === "string" ? JSON.parse(raw) : raw);
+        if (!validateCallConfig(cfg)) return cfg;
+      } catch {
+      }
+    }
+    const env = globalThis?.xiaozhiConfig;
+    return normalizeCallConfig({ url: env?.videoChatUrl || "" });
+  }
+  function saveCallConfig(storage, cfg) {
+    const normalized = normalizeCallConfig(cfg);
+    storage.set(STORAGE_KEY, JSON.stringify(normalized));
+    return normalized;
+  }
+  function signalingUrl({ url: url2 }) {
+    const u2 = new URL(url2);
+    u2.searchParams.set("role", "blimp");
+    u2.searchParams.set("token", BLIMP_PASSWORD);
+    return u2.toString();
+  }
+
+  // src/videochat/camera-view.mjs
+  var bridge = () => globalThis.__nativeCameraViewRaw || null;
+  var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+  var cameraView = {
+    /** Only the Android app has it. */
+    get available() {
+      return !!bridge();
+    },
+    /** The stream server ({ url }, as for calls); an empty url turns the view off. */
+    configure(cfg) {
+      bridge()?.configure(cfg?.url || "", BLIMP_PASSWORD);
+    },
+    /**
+     * Takes the camera from the view (reason: photo | call) and waits until it
+     * is closed. Returns an id for release().
+     */
+    async hold(reason) {
+      const b2 = bridge();
+      if (!b2) return null;
+      const id = b2.hold(reason);
+      const deadline = Date.now() + Number(b2.closeTimeoutMs?.() || 3e3);
+      while (!b2.isFree() && Date.now() < deadline) await sleep(30);
+      return id;
+    },
+    release(id) {
+      if (id) bridge()?.release(id);
+    },
+    /** Runs fn with the camera taken from the view, then gives it back. */
+    async withCamera(reason, fn) {
+      const id = await this.hold(reason);
+      try {
+        return await fn();
+      } finally {
+        this.release(id);
+      }
+    },
+    get status() {
+      try {
+        return JSON.parse(bridge()?.getStatus() || "null");
+      } catch {
+        return null;
+      }
+    }
+  };
 
   // src/xiaozhi/mcp/tools/camera.mjs
   var MAX_SIDE = 768;
   var JPEG_QUALITY = 0.75;
   var SETTLE_MS = 500;
-  async function capturePhoto({ facing = "user", maxSide = MAX_SIDE } = {}) {
+  async function capturePhoto(opts = {}) {
+    return cameraView.withCamera("photo", () => grabPhoto(opts));
+  }
+  async function grabPhoto({ facing = "user", maxSide = MAX_SIDE } = {}) {
     const media = globalThis.navigator?.mediaDevices;
     if (!media?.getUserMedia) throw new Error("Camera is not available on this device");
     const stream = await media.getUserMedia({
@@ -34575,23 +34665,23 @@ void main(void)\r
   }
 
   // src/xiaozhi/mcp/tools/index.mjs
-  function registerAllTools(mcp, bridge) {
-    registerSelfControlTools(mcp, bridge);
+  function registerAllTools(mcp, bridge2) {
+    registerSelfControlTools(mcp, bridge2);
     registerCameraTools(mcp);
   }
 
   // src/xiaozhi/conversation/conversation.mjs
   var IDLE_PING_MS = 6e4;
   var Conversation = class extends EventTarget {
-    constructor({ bridge, identity, wsUrl, wsToken, assetUrls: assetUrls2 }) {
+    constructor({ bridge: bridge2, identity, wsUrl, wsToken, assetUrls: assetUrls2 }) {
       super();
-      this.bridge = bridge;
+      this.bridge = bridge2;
       this.identity = identity;
       this.wsUrl = wsUrl;
       this.wsToken = wsToken;
       this.assetUrls = assetUrls2;
       this.state = new StateManager();
-      this.mouth = new MouthDriver(bridge);
+      this.mouth = new MouthDriver(bridge2);
       this.vad = new SilenceVad();
       this.mcp = new McpServer();
       this.mcp.setLogger((level, message, detail = {}) => {
@@ -34600,7 +34690,7 @@ void main(void)\r
           ...detail || {}
         });
       });
-      registerAllTools(this.mcp, bridge);
+      registerAllTools(this.mcp, bridge2);
       this.protocol = null;
       this.encoder = null;
       this.decoder = null;
@@ -35200,11 +35290,11 @@ void main(void)\r
   };
 
   // src/xiaozhi/index.mjs
-  async function createXiaozhiAgent({ bridge, assetUrls: assetUrls2, backend, onActivationRequired }) {
-    const storage = bridge.storage;
+  async function createXiaozhiAgent({ bridge: bridge2, assetUrls: assetUrls2, backend, onActivationRequired }) {
+    const storage = bridge2.storage;
     const identity = await ensureDeviceIdentity(storage);
     const { wsUrl, wsToken } = await ensureActivated(storage, backend, onActivationRequired);
-    const conversation = new Conversation({ bridge, identity, wsUrl, wsToken, assetUrls: assetUrls2 });
+    const conversation = new Conversation({ bridge: bridge2, identity, wsUrl, wsToken, assetUrls: assetUrls2 });
     await conversation.init();
     return { conversation, identity };
   }
@@ -36217,8 +36307,8 @@ void main(void)\r
 
   // src/xiaozhi/wake/wake-coordinator.mjs
   var NativeWakeProvider = class {
-    constructor(bridge) {
-      this.bridge = bridge;
+    constructor(bridge2) {
+      this.bridge = bridge2;
       this.handlers = /* @__PURE__ */ new Set();
       this.unsubscribe = null;
     }
@@ -36248,9 +36338,9 @@ void main(void)\r
     }
   };
   function createWakeProvider({ hostServiceUrl, audioCapture, nativeBridge } = {}) {
-    const bridge = nativeBridge || globalThis.nativeWakeWord;
-    if (bridge && typeof bridge.start === "function" && typeof bridge.onWake === "function") {
-      return new NativeWakeProvider(bridge);
+    const bridge2 = nativeBridge || globalThis.nativeWakeWord;
+    if (bridge2 && typeof bridge2.start === "function" && typeof bridge2.onWake === "function") {
+      return new NativeWakeProvider(bridge2);
     }
     if (audioCapture) {
       return new WebAudioWakeProvider({ hostServiceUrl, audioCapture });
@@ -36889,48 +36979,6 @@ void main(void)\r
     }
   };
 
-  // src/videochat/call-config.mjs
-  var STORAGE_KEY = "blimpmate.videochat_v1";
-  var BLIMP_PASSWORD = "blimpmate";
-  function normalizeCallConfig(cfg) {
-    let url2 = typeof cfg?.url === "string" ? cfg.url.trim() : "";
-    if (/^https?:\/\//i.test(url2)) {
-      const u2 = new URL(url2);
-      u2.protocol = u2.protocol === "https:" ? "wss:" : "ws:";
-      if (u2.pathname === "/" || u2.pathname === "") u2.pathname = "/ws";
-      url2 = u2.toString();
-    }
-    return { url: url2 };
-  }
-  function validateCallConfig(cfg) {
-    const { url: url2 } = normalizeCallConfig(cfg);
-    if (url2 && !/^wss?:\/\/\S+$/i.test(url2)) return "Use wss://host:port/ws (or the https:// page address).";
-    return null;
-  }
-  function loadCallConfig(storage) {
-    const raw = storage?.get?.(STORAGE_KEY);
-    if (raw) {
-      try {
-        const cfg = normalizeCallConfig(typeof raw === "string" ? JSON.parse(raw) : raw);
-        if (!validateCallConfig(cfg)) return cfg;
-      } catch {
-      }
-    }
-    const env = globalThis?.xiaozhiConfig;
-    return normalizeCallConfig({ url: env?.videoChatUrl || "" });
-  }
-  function saveCallConfig(storage, cfg) {
-    const normalized = normalizeCallConfig(cfg);
-    storage.set(STORAGE_KEY, JSON.stringify(normalized));
-    return normalized;
-  }
-  function signalingUrl({ url: url2 }) {
-    const u2 = new URL(url2);
-    u2.searchParams.set("role", "blimp");
-    u2.searchParams.set("token", BLIMP_PASSWORD);
-    return u2.toString();
-  }
-
   // src/videochat/call-controller.mjs
   var BLIMP_MEDIA = {
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -36979,6 +37027,7 @@ void main(void)\r
         onEnd: () => this.end("touch")
       });
       this._ownsAudio = false;
+      this._cameraHold = null;
       this._stopKeywords = null;
       this._queue = Promise.resolve();
     }
@@ -36999,6 +37048,7 @@ void main(void)\r
         this.client.close();
         this.client = null;
       }
+      this._releaseCamera();
       this._setState("off");
       if (!cfg?.url) return;
       let url2;
@@ -37010,7 +37060,10 @@ void main(void)\r
       }
       const client = new CallClient({
         url: url2,
-        getMedia: () => navigator.mediaDevices.getUserMedia(BLIMP_MEDIA),
+        getMedia: async () => {
+          await this._holdCamera();
+          return navigator.mediaDevices.getUserMedia(BLIMP_MEDIA);
+        },
         preferVideoCodec: BLIMP_VIDEO_CODEC,
         maxVideoBitrate: BLIMP_VIDEO_MAX_BITRATE
       });
@@ -37137,7 +37190,20 @@ void main(void)\r
       this._setState(this.client?.connected ? "idle" : "off");
       this.view.setRemoteStream(null);
       this.view.ended(message);
+      this._releaseCamera();
       await this._releaseAudio();
+    }
+    // ---- camera: taken from the live camera view for the call ----
+    async _holdCamera() {
+      if (this._cameraHold) return;
+      this._cameraHold = cameraView.hold("call");
+      await this._cameraHold;
+    }
+    _releaseCamera() {
+      const hold = this._cameraHold;
+      if (!hold) return;
+      this._cameraHold = null;
+      hold.then((id) => cameraView.release(id));
     }
     // ---- audio ownership ----
     async _takeAudio() {
@@ -38666,6 +38732,7 @@ void main(void)\r
       if (error) return error;
       const saved = saveCallConfig(window.hostBridge.storage, cfg);
       window.__xz?.callController?.configure(saved);
+      cameraView.configure(saved);
       return null;
     },
     onDisconnect: async () => {
@@ -39047,6 +39114,8 @@ void main(void)\r
       const callConfig = loadCallConfig(window.hostBridge.storage);
       chatPanel.setCallConfig(callConfig);
       callController.configure(callConfig);
+      cameraView.configure(callConfig);
+      window.__xz.cameraView = cameraView;
       window.__xz.remoteControl = startRemoteControl({
         conversation: conv,
         identity: agent.identity,

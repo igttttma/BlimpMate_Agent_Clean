@@ -84,7 +84,34 @@ adb shell dumpsys deviceidle whitelist +com.blimpmate.remote
 
 # Status notification
 adb shell pm grant com.blimpmate.remote android.permission.POST_NOTIFICATIONS
+
+# Last: Wi-Fi setup over Bluetooth (lets the app join Wi-Fi; it then grants its
+# own Bluetooth/location permissions). Fails if the device has accounts signed in.
+adb shell dpm set-device-owner com.blimpmate.remote/.AdminReceiver
 ```
+
+### Wi-Fi setup over Bluetooth
+
+When the device has no network, nothing reaches it through the server. The
+agent also runs a Bluetooth LE service (`WifiSetup`, always on, no pairing): open
+`https://<stream server>/setup` on a phone (Chrome on Android/Windows/Mac; Bluefy
+on iPhone), tap "Find the Blimp", and pick a network. The page shows Wi-Fi, IP
+and whether remote control is online, and can switch to another saved or
+nearby network, forget one, disconnect, turn Wi-Fi off/on, and point the agent
+at the page's server. A switch that doesn't connect within 25 s goes back to
+the previous network.
+
+The same commands work over adb (for when a cable is at hand):
+
+```
+adb shell am start -n com.blimpmate.remote/.SetupActivity --es wifi_ssid "Name" --es wifi_password "pass"
+adb shell am start -n com.blimpmate.remote/.SetupActivity --es wifi_cmd '{"cmd":"forget","ssid":"Name"}'
+```
+
+Device owner can't be removed from outside: before uninstalling the app run
+`adb shell am start -n com.blimpmate.remote/.SetupActivity --ez release_owner true`.
+App updates (`adb install -r`) keep it. Bluetooth must be on: as device owner
+the agent turns it back on by itself.
 
 The app must have been opened once (any install leaves it "stopped" until then)
 before Android delivers the boot broadcast to it. Settings above survive reboots

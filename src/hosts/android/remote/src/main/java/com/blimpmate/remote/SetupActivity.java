@@ -62,8 +62,26 @@ public final class SetupActivity extends Activity {
         }
     }
 
-    /** Saves a url passed by adb; true when one was. */
+    /**
+     * Applies settings passed by adb; true when a url was. Besides --es url:
+     *   --es wifi_ssid NAME --es wifi_password PASS   join a network
+     *   --es wifi_cmd '{"cmd":"forget","ssid":"x"}'    any Wi-Fi setup command
+     *   --ez release_owner true                         stop being device owner (before uninstalling)
+     */
     private boolean applyExtras(Intent intent) {
+        String ssid = intent.getStringExtra("wifi_ssid");
+        if (ssid != null) {
+            try {
+                String pw = intent.getStringExtra("wifi_password");
+                RemoteService.wifiCommand(this, new org.json.JSONObject().put("cmd", "wifi").put("ssid", ssid)
+                        .put("password", pw == null ? "" : pw).toString());
+            } catch (org.json.JSONException ignored) {}
+        }
+        String cmd = intent.getStringExtra("wifi_cmd");
+        if (cmd != null) RemoteService.wifiCommand(this, cmd);
+        if (intent.getBooleanExtra("release_owner", false) && WifiSetup.isDeviceOwner(this)) {
+            getSystemService(android.app.admin.DevicePolicyManager.class).clearDeviceOwnerApp(getPackageName());
+        }
         String u = intent.getStringExtra("url");
         if (u == null) return false;
         Config.save(this, u);
@@ -172,6 +190,11 @@ public final class SetupActivity extends Activity {
         if (!batteryOk) s.append("    adb shell dumpsys deviceidle whitelist +").append(pkg).append('\n');
         s.append(line(notify, "Status notification"));
         if (!notify) s.append("    adb shell pm grant ").append(pkg).append(" android.permission.POST_NOTIFICATIONS\n");
+        boolean owner = WifiSetup.isDeviceOwner(this);
+        s.append(line(owner, "Wi-Fi setup over Bluetooth (device owner)"));
+        if (!owner) s.append("    adb shell dpm set-device-owner ").append(pkg).append("/.AdminReceiver\n");
+        s.append("    Bluetooth: ").append(WifiSetup.state).append('\n');
+        if (!WifiSetup.result.isEmpty()) s.append("    Last: ").append(WifiSetup.result).append('\n');
         checks.setText(s.toString());
     }
 

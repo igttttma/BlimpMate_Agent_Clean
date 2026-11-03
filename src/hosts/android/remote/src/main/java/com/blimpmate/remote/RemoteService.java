@@ -57,6 +57,9 @@ public final class RemoteService extends Service {
 
     /** What the setup screen shows. */
     public static volatile String status = "Not running";
+    /** Connected to the stream server. */
+    public static volatile boolean online;
+    private static final String ACTION_WIFI = "com.blimpmate.remote.WIFI";
 
     private HandlerThread thread;
     private Handler handler;
@@ -75,6 +78,7 @@ public final class RemoteService extends Service {
     private PowerManager.WakeLock wakeLock;
     private DisplayManager.DisplayListener displayListener;
     private ConnectivityManager.NetworkCallback networkCallback;
+    private WifiSetup wifiSetup;
 
     public static void start(Context context) {
         context.startForegroundService(new Intent(context, RemoteService.class));
@@ -83,6 +87,12 @@ public final class RemoteService extends Service {
     /** Reconnects with the saved settings (after the setup screen changes them). */
     public static void reconnect(Context context) {
         context.startForegroundService(new Intent(context, RemoteService.class).setAction(ACTION_RECONNECT));
+    }
+
+    /** Runs a Wi-Fi setup command (the same JSON the Bluetooth setup takes), e.g. from adb. */
+    public static void wifiCommand(Context context, String json) {
+        context.startForegroundService(new Intent(context, RemoteService.class).setAction(ACTION_WIFI)
+                .putExtra("command", json));
     }
 
     /** Resends the device info (input control was turned on or off). */
@@ -134,13 +144,25 @@ public final class RemoteService extends Service {
             }
         };
         getSystemService(DisplayManager.class).registerDisplayListener(displayListener, handler);
+
+        // Wi-Fi setup over Bluetooth, for when there's no network to reach the server
+        wifiSetup = new WifiSetup(this, handler);
+        wifiSetup.start();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
         boolean force = ACTION_RECONNECT.equals(action);
+        String wifiCommand = ACTION_WIFI.equals(action) ? intent.getStringExtra("command") : null;
         handler.post(() -> {
+            if (wifiCommand != null) {
+                try {
+                    wifiSetup.onCommand(new JSONObject(wifiCommand));
+                } catch (Exception e) {
+                    Log.w(TAG, "bad wifi command", e);
+                }
+            }
             if (ACTION_INFO.equals(action) && connected) sendInfo();
             if (force) {
                 disconnect("settings changed");
@@ -153,7 +175,11 @@ public final class RemoteService extends Service {
 
     @Override
     public void onDestroy() {
-        handler.post(() -> disconnect("service stopped"));
+        handler.post(() -> {
+            disconnect("service stopped");
+            wifiSetup.stop();
+        });
+        online = false;
         getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
         getSystemService(DisplayManager.class).unregisterDisplayListener(displayListener);
         thread.quitSafely();
@@ -413,6 +439,7 @@ public final class RemoteService extends Service {
 
     private void setStatus(String s) {
         status = s;
+        online = connected;
         Log.i(TAG, s);
         getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(s));
     }

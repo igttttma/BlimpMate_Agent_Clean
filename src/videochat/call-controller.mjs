@@ -265,6 +265,9 @@ export class CallController extends EventTarget {
     try { await this.getWakeCoordinator()?.stop(); } catch {}
     // Closes the xiaozhi connection (if any) and its microphone capture
     try { await this.conversation.endSession(); } catch {}
+    // Android: the conversation mic is the wake word's native recorder, kept open
+    // between turns; give it up now so the call's WebRTC microphone gets it
+    try { this.conversation.capture?.release?.(); } catch {}
   }
 
   async _releaseAudio() {

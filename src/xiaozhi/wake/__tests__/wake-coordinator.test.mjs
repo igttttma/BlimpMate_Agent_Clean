@@ -48,7 +48,7 @@ async function testConversationWakeInterruptOrder() {
   const conversation = {
     protocol: { isOpen: () => true },
     _sendingFrames: true,
-    capture: { _node: {} },
+    capture: { isOpen: true },
     _emitLog() {},
     dispatchEvent() {},
     _awaitGreeting() { return Promise.resolve(); },

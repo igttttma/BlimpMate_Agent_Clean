@@ -126,6 +126,12 @@ public final class MainActivity extends Activity {
             }
 
             @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (!isKioskMode) activatePage(0);
+            }
+
+            @Override
             public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
                                        android.webkit.WebResourceError error) {
                 super.onReceivedError(view, request, error);
@@ -198,6 +204,37 @@ public final class MainActivity extends Activity {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Some WebView builds (the Blimp's) keep every AudioContext suspended until the
+     * page has had a user gesture, despite setMediaPlaybackRequiresUserGesture(false):
+     * after a cold start the mic never opened until someone touched the screen. A
+     * Blimp has nobody to touch it, so tap once ourselves (top-left corner: the
+     * avatar canvas background, no controls) and retry until the page says it's
+     * activated. Runs after every page load, since a reload loses the activation.
+     */
+    private void activatePage(int attempt) {
+        reloadHandler.postDelayed(() -> {
+            if (isDestroyed() || webView == null) return;
+            long now = android.os.SystemClock.uptimeMillis();
+            android.view.MotionEvent down = android.view.MotionEvent.obtain(
+                now, now, android.view.MotionEvent.ACTION_DOWN, 1f, 1f, 0);
+            android.view.MotionEvent up = android.view.MotionEvent.obtain(
+                now, now + 50, android.view.MotionEvent.ACTION_UP, 1f, 1f, 0);
+            down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+            up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+            webView.dispatchTouchEvent(down);
+            webView.dispatchTouchEvent(up);
+            down.recycle();
+            up.recycle();
+            webView.evaluateJavascript(
+                "(function(){var u=navigator.userActivation;return u?String(u.hasBeenActive):'unknown';})()",
+                (active) -> {
+                    android.util.Log.i("BlimpMate", "Page activation tap " + (attempt + 1) + ": active=" + active);
+                    if (!"\"true\"".equals(active) && attempt < 4) activatePage(attempt + 1);
+                });
+        }, attempt == 0 ? 500 : 1000);
     }
 
     private void scheduleReload() {
@@ -338,13 +375,24 @@ public final class MainActivity extends Activity {
         "(function(){\n" +
         "  if (!window.__nativeWakeWordRaw) return;\n" +
         "  var handlers = new Set();\n" +
+        "  var pcmHandlers = new Set();\n" +
+        "  var nearHandlers = new Set();\n" +
+        "  var sampleHandlers = new Set();\n" +
         "  var lastStatus = { running: false, mode: 'openwakeword' };\n" +
         "  function parse(raw){ try { return JSON.parse(raw || '{}'); } catch (_) { return {}; } }\n" +
         "  window.__nativeWakeWordDispatch = function(type, payloadB64){\n" +
         "    try {\n" +
+        "      if (type === 'pcm') {\n" +
+        "        var bin = atob(payloadB64), n = bin.length >> 1, out = new Float32Array(n);\n" +
+        "        for (var i = 0; i < n; i++) { var v = bin.charCodeAt(2*i) | (bin.charCodeAt(2*i+1) << 8); out[i] = (v >= 32768 ? v - 65536 : v) / 32768; }\n" +
+        "        pcmHandlers.forEach(function(cb){ try { cb(out); } catch (_) {} });\n" +
+        "        return;\n" +
+        "      }\n" +
         "      var payload = parse(atob(payloadB64));\n" +
         "      if (type === 'status') lastStatus = payload;\n" +
         "      if (type === 'wake') handlers.forEach(function(cb){ try { cb(payload); } catch (_) {} });\n" +
+        "      if (type === 'near') nearHandlers.forEach(function(cb){ try { cb(payload); } catch (_) {} });\n" +
+        "      if (type === 'sample') sampleHandlers.forEach(function(cb){ try { cb(payload); } catch (_) {} });\n" +
         "    } catch (e) { console.error('[nativeWakeWord] dispatch error', e); }\n" +
         "  };\n" +
         "  window.nativeWakeWord = {\n" +
@@ -353,7 +401,17 @@ public final class MainActivity extends Activity {
         "    start: function(){ lastStatus = parse(window.__nativeWakeWordRaw.start()); return Promise.resolve(lastStatus); },\n" +
         "    startKeywords: function(set){ lastStatus = parse(window.__nativeWakeWordRaw.startKeywords(String(set))); return Promise.resolve(lastStatus); },\n" +
         "    stop: function(){ lastStatus = parse(window.__nativeWakeWordRaw.stop()); return Promise.resolve(lastStatus); },\n" +
-        "    getStatus: function(){ lastStatus = parse(window.__nativeWakeWordRaw.getStatus()); return lastStatus; }\n" +
+        "    getStatus: function(){ lastStatus = parse(window.__nativeWakeWordRaw.getStatus()); return lastStatus; },\n" +
+        "    // Conversation audio from the wake word's recorder (16 kHz mono Float32, 80 ms chunks)\n" +
+        "    onPcm: function(cb){ pcmHandlers.add(cb); return function(){ pcmHandlers.delete(cb); }; },\n" +
+        "    // Wake word tuning: bursts that scored but didn't fire ({ score, frames, level_dbfs, ... })\n" +
+        "    onNear: function(cb){ nearHandlers.add(cb); return function(){ nearHandlers.delete(cb); }; },\n" +
+        "    // Wake word samples for the portal: recordSample(seconds, id, 'wake'|'answer') -> 'sample' event\n" +
+        "    onSample: function(cb){ sampleHandlers.add(cb); return function(){ sampleHandlers.delete(cb); }; },\n" +
+        "    recordSample: function(seconds, id, set){ return parse(window.__nativeWakeWordRaw.recordSample(Number(seconds), String(id), String(set || 'wake'))); },\n" +
+        "    startStream: function(){ return parse(window.__nativeWakeWordRaw.startStream()); },\n" +
+        "    stopStream: function(){ return parse(window.__nativeWakeWordRaw.stopStream()); },\n" +
+        "    releaseMic: function(){ return parse(window.__nativeWakeWordRaw.releaseMic()); }\n" +
         "  };\n" +
         "})();";
 }

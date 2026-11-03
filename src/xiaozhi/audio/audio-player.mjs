@@ -1,4 +1,5 @@
 import { APP_CONFIG } from "../config/app-config.mjs";
+import { resumeContext } from "./resume-context.mjs";
 
 export class AudioPlayer {
   constructor({ workletUrl }) {
@@ -16,7 +17,7 @@ export class AudioPlayer {
   async start() {
     if (this._node) return;
     this._ctx = new AudioContext();
-    if (this._ctx.state === "suspended") await this._ctx.resume();
+    await resumeContext(this._ctx, "playback");
     await this._ctx.audioWorklet.addModule(this._workletUrl);
     this._node = new AudioWorkletNode(this._ctx, "xiaozhi-playback", {
       processorOptions: {

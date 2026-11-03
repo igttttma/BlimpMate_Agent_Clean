@@ -242,8 +242,11 @@ export class WsProtocol extends EventTarget {
     return false;
   }
 
-  sendStartListening(mode) {
-    return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.START, mode });
+  // `timing` (optional): how long opening the mic took (diagnostics, logged by the server)
+  sendStartListening(mode, timing = null) {
+    const msg = { session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.START, mode };
+    if (timing) msg.timing = timing;
+    return this._sendText(msg);
   }
   sendStopListening() {
     return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.STOP });

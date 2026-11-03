@@ -4,6 +4,7 @@ import { StateManager } from "./state-manager.mjs";
 import { MouthDriver } from "./mouth-driver.mjs";
 import { OpusEncoder, OpusDecoder } from "../audio/opus-codec.mjs";
 import { AudioCapture } from "../audio/audio-capture.mjs";
+import { NativeMicCapture } from "../audio/native-mic-capture.mjs";
 import { AudioPlayer } from "../audio/audio-player.mjs";
 import { SilenceVad } from "../audio/vad.mjs";
 import { McpServer } from "../mcp/mcp-server.mjs";
@@ -145,7 +146,12 @@ export class Conversation extends EventTarget {
     this.decoder = new OpusDecoder({ scriptUrl: this.assetUrls.decoderScript });
     await this.decoder.init();
 
-    this.capture = new AudioCapture({ workletUrl: this.assetUrls.captureWorklet });
+    // Android: the wake word's native recorder, handed over (no mic to open after
+    // the greeting). Elsewhere: a WebView/Electron microphone.
+    this.capture = NativeMicCapture.isSupported()
+      ? new NativeMicCapture({ onStall: (info) => this._sendMicDebug("stall", info) })
+      : new AudioCapture({ workletUrl: this.assetUrls.captureWorklet });
+    console.log("[audio] conversation mic: " + (this.capture instanceof NativeMicCapture ? "native recorder" : "web audio"));
     this.capture.onFrame((frame) => {
       this._dbgFrames++;
       if (this._dbgFrames <= 3 || this._dbgFrames % 50 === 0) {
@@ -153,7 +159,13 @@ export class Conversation extends EventTarget {
       }
       // No local VAD — server decides when to stop in auto mode (py-xiaozhi parity)
       this.dispatchEvent(new CustomEvent("level", { detail: { rms: 0 } }));
-      if (this._sendingFrames && this.encoder) this.encoder.encode(frame);
+      if (!this._sendingFrames || !this.encoder) return;
+      // A mic without echo cancellation (the native recorder on a device without
+      // one) would send the Blimp's own reply back: silence while it speaks
+      if (this.capture.echoCancelled === false && this.state.device === DeviceState.SPEAKING) {
+        frame = new Float32Array(frame.length);
+      }
+      this.encoder.encode(frame);
     });
 
     this.player = new AudioPlayer({ workletUrl: this.assetUrls.playbackWorklet });
@@ -164,6 +176,12 @@ export class Conversation extends EventTarget {
       if (this._ttsTurn) this.mouth.feedRms(rms);
     });
     await this.player.start();
+
+    // Wake word tuning (Android): near misses and the score of each real wake go
+    // to the server log as {"type":"wake_debug"} (the server logs any message type)
+    if (typeof globalThis.nativeWakeWord?.onNear === "function") {
+      globalThis.nativeWakeWord.onNear((near) => this._sendWakeDebug({ fired: false, ...near }));
+    }
 
     this.mcp.setSender((payload) => {
       if (this.protocol && this.protocol.isOpen()) this.protocol.sendMcp(payload);
@@ -367,8 +385,25 @@ export class Conversation extends EventTarget {
     this._emitLog("info", "wake client attached");
   }
 
+  // Native mic diagnostics in the server log ({"type":"mic_debug"}): its state at each
+  // mic open, and every time the watchdog had to restart a stalled stream
+  _sendMicDebug(event, info = {}) {
+    try {
+      if (this.protocol?.isOpen?.()) this.protocol._sendText({ type: "mic_debug", event, ...info });
+    } catch { /* diagnostics only */ }
+  }
+
+  _sendWakeDebug(info) {
+    try {
+      if (this.protocol?.isOpen?.()) this.protocol._sendText({ type: "wake_debug", ...info });
+    } catch { /* diagnostics only */ }
+  }
+
   async activateFromWake(event = {}, { beforeListen } = {}) {
     const word = event?.word || "Hey Blimp";
+    if (typeof event?.score === "number") {
+      this._sendWakeDebug({ fired: true, keywords: event.keywords, score: event.score, level_dbfs: event.level_dbfs });
+    }
     this._emitLog("info", "wake word detected", { word, source: "wake-provider" });
     this.dispatchEvent(new CustomEvent("xz-status", {
       detail: { phase: "wake-triggered", message: "Waking...", word }
@@ -384,7 +419,7 @@ export class Conversation extends EventTarget {
       if (this.protocol?.isOpen?.()) {
         await this.abort(AbortReason.WAKE_WORD_DETECTED);
       }
-      if (this._sendingFrames || this.capture?._node) {
+      if (this._sendingFrames || this.capture?.isOpen) {
         await this.stopListening();
       }
       await preparation;
@@ -406,6 +441,13 @@ export class Conversation extends EventTarget {
       if (reported) {
         // Listen once the greeting has played, so the microphone doesn't hear it
         await greeting;
+        // Diagnostics: how long the mic takes to open after the greeting (sent
+        // with the listen start, so the server log shows it)
+        const t = this._greetingTiming || {};
+        this._listenTiming = {
+          start: performance.now(),
+          greeting_drain_ms: t.stop && t.drained ? Math.round(t.drained - t.stop) : null
+        };
       } else {
         this._resolveGreetingWait();
         this._emitLog("warn", "wake-word report failed; continuing with microphone", { word });
@@ -450,6 +492,9 @@ export class Conversation extends EventTarget {
       if (superseded()) return false;
     }
     this._emitLog("info", `start listening`, { mode });
+    const timing = this._listenTiming;
+    this._listenTiming = null;
+    const tEncoder = performance.now();
     try {
       await this._ensureEncoder();
       console.log("[audio] encoder ready");
@@ -458,6 +503,7 @@ export class Conversation extends EventTarget {
       return false;
     }
     if (superseded()) return false;
+    const tCapture = performance.now();
     try {
       await this.capture.start("conversation");
       console.log("[audio] capture ready, ctx rate=" + (this.capture._ctx && this.capture._ctx.sampleRate));
@@ -482,9 +528,19 @@ export class Conversation extends EventTarget {
     if (!(this._listenThroughReplies && this.state.device === DeviceState.SPEAKING)) {
       this.state.setDevice(DeviceState.LISTENING);
     }
+    const listenTiming = timing ? {
+      ...timing,
+      start: undefined,
+      encoder_ms: Math.round(tCapture - tEncoder),
+      ...Object.fromEntries(Object.entries(this.capture.lastOpenTiming || {}).map(([k, v]) => [`${k}_ms`, v])),
+      after_greeting_ms: Math.round(performance.now() - timing.start)
+    } : null;
+    if (listenTiming) console.log("[audio] mic open timing " + JSON.stringify(listenTiming));
+    if (typeof this.capture.status === "function") this._sendMicDebug("open", { native: this.capture.status() });
     this.protocol.sendStartListening(
       this._listenThroughReplies || mode === ListeningMode.REALTIME ? "realtime" :
-      mode === ListeningMode.AUTO_STOP ? "auto" : "manual"
+      mode === ListeningMode.AUTO_STOP ? "auto" : "manual",
+      listenTiming
     );
     return true;
   }
@@ -585,6 +641,7 @@ export class Conversation extends EventTarget {
   // the wake some other way (reply audio, nothing) or not at all
   _awaitGreeting(timeoutMs = 8000) {
     this._resolveGreetingWait();
+    this._greetingTiming = null;
     return new Promise((resolve) => {
       const timer = setTimeout(() => this._resolveGreetingWait(), timeoutMs);
       this._greetingWaiter = () => { clearTimeout(timer); resolve(); };
@@ -621,7 +678,9 @@ export class Conversation extends EventTarget {
           // own abort, not the wake.)
           this.state.setDevice(DeviceState.IDLE);
           const waiter = this._greetingWaiter;
+          this._greetingTiming = { stop: performance.now() };
           (this.player ? this.player.drained() : Promise.resolve()).then(() => {
+            this._greetingTiming.drained = performance.now();
             if (this._greetingWaiter === waiter) this._resolveGreetingWait();
           });
         } else if (this._listenThroughReplies && this._sendingFrames) {

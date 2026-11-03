@@ -33611,8 +33611,11 @@ void main(void)\r
       }
       return false;
     }
-    sendStartListening(mode) {
-      return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.START, mode });
+    // `timing` (optional): how long opening the mic took (diagnostics, logged by the server)
+    sendStartListening(mode, timing = null) {
+      const msg = { session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.START, mode };
+      if (timing) msg.timing = timing;
+      return this._sendText(msg);
     }
     sendStopListening() {
       return this._sendText({ session_id: this.sessionId, type: ClientMsg.LISTEN, state: ListenState.STOP });
@@ -33953,25 +33956,47 @@ void main(void)\r
     }
   };
 
+  // src/xiaozhi/audio/resume-context.mjs
+  async function resumeContext(ctx, what, timeoutMs = 3e3) {
+    if (!ctx || ctx.state !== "suspended") return true;
+    let timer;
+    const resumed = await Promise.race([
+      ctx.resume().then(() => true, () => false),
+      new Promise((resolve2) => {
+        timer = setTimeout(() => resolve2(false), timeoutMs);
+      })
+    ]);
+    clearTimeout(timer);
+    if (!resumed) {
+      console.warn(`[audio] ${what} AudioContext still suspended after ${timeoutMs} ms (page has had no user gesture); continuing`);
+    }
+    return resumed;
+  }
+
   // src/xiaozhi/audio/audio-capture.mjs
   var AudioCapture = class {
     constructor({ workletUrl: workletUrl2 }) {
       this._workletUrl = workletUrl2;
       this._ctx = null;
-      this._stream = null;
       this._node = null;
+      this._gainNode = null;
+      this._stream = null;
+      this._source = null;
       this._frameHandlers = /* @__PURE__ */ new Set();
       this._owners = /* @__PURE__ */ new Set();
-      this._gainNode = null;
       this._startPromise = null;
+      this.lastOpenTiming = null;
     }
     onFrame(cb) {
       if (typeof cb === "function") this._frameHandlers.add(cb);
       return () => this._frameHandlers.delete(cb);
     }
+    get isOpen() {
+      return Boolean(this._source);
+    }
     async start(owner = "default") {
       this._owners.add(owner);
-      if (this._node) return;
+      if (this._source) return;
       if (this._startPromise) {
         try {
           await this._startPromise;
@@ -33991,7 +34016,42 @@ void main(void)\r
         this._startPromise = null;
       }
     }
+    async _ensureEngine() {
+      if (this._node) return;
+      const ctx = new AudioContext();
+      try {
+        await resumeContext(ctx, "microphone");
+        await ctx.audioWorklet.addModule(this._workletUrl);
+        const node = new AudioWorkletNode(ctx, "xiaozhi-capture", {
+          processorOptions: {
+            targetSampleRate: APP_CONFIG.AUDIO.INPUT_SAMPLE_RATE,
+            frameSize: APP_CONFIG.AUDIO.INPUT_FRAME_SIZE
+          }
+        });
+        node.port.onmessage = (e2) => {
+          for (const handler of this._frameHandlers) {
+            try {
+              handler(e2.data);
+            } catch {
+            }
+          }
+        };
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        node.connect(gain).connect(ctx.destination);
+        this._ctx = ctx;
+        this._node = node;
+        this._gainNode = gain;
+      } catch (error) {
+        try {
+          await ctx.close();
+        } catch {
+        }
+        throw error;
+      }
+    }
     async _open() {
+      const t0 = performance.now();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -34000,40 +34060,20 @@ void main(void)\r
           autoGainControl: true
         }
       });
-      this._stream = stream;
+      const t1 = performance.now();
       try {
-        this._ctx = new AudioContext();
-        if (this._ctx.state === "suspended") await this._ctx.resume();
-        await this._ctx.audioWorklet.addModule(this._workletUrl);
-        const src = this._ctx.createMediaStreamSource(stream);
-        this._node = new AudioWorkletNode(this._ctx, "xiaozhi-capture", {
-          processorOptions: {
-            targetSampleRate: APP_CONFIG.AUDIO.INPUT_SAMPLE_RATE,
-            frameSize: APP_CONFIG.AUDIO.INPUT_FRAME_SIZE
-          }
-        });
-        this._node.port.onmessage = (e2) => {
-          for (const handler of this._frameHandlers) {
-            try {
-              handler(e2.data);
-            } catch {
-            }
-          }
+        const reused = Boolean(this._node);
+        await this._ensureEngine();
+        if (reused) await resumeContext(this._ctx, "microphone");
+        this._source = this._ctx.createMediaStreamSource(stream);
+        this._source.connect(this._node);
+        this._stream = stream;
+        this.lastOpenTiming = {
+          mic: Math.round(t1 - t0),
+          engine: reused ? 0 : Math.round(performance.now() - t1)
         };
-        src.connect(this._node);
-        this._gainNode = this._ctx.createGain();
-        this._gainNode.gain.value = 0;
-        this._node.connect(this._gainNode).connect(this._ctx.destination);
       } catch (error) {
         for (const track of stream.getTracks()) track.stop();
-        this._stream = null;
-        if (this._ctx) {
-          try {
-            await this._ctx.close();
-          } catch {
-          }
-          this._ctx = null;
-        }
         throw error;
       }
     }
@@ -34047,20 +34087,35 @@ void main(void)\r
         }
       }
       if (this._owners.size > 0) return;
-      if (this._node) try {
-        this._node.disconnect();
+      if (this._source) try {
+        this._source.disconnect();
       } catch {
       }
-      this._node = null;
-      if (this._gainNode) try {
-        this._gainNode.disconnect();
-      } catch {
-      }
-      this._gainNode = null;
+      this._source = null;
       if (this._stream) {
         for (const t2 of this._stream.getTracks()) t2.stop();
         this._stream = null;
       }
+      if (this._ctx && typeof this._ctx.suspend === "function") {
+        try {
+          await this._ctx.suspend();
+        } catch {
+        }
+      }
+    }
+    async shutdown() {
+      this._owners.clear();
+      await this.stop("shutdown");
+      if (this._node) try {
+        this._node.disconnect();
+      } catch {
+      }
+      if (this._gainNode) try {
+        this._gainNode.disconnect();
+      } catch {
+      }
+      this._node = null;
+      this._gainNode = null;
       if (this._ctx) {
         try {
           await this._ctx.close();
@@ -34069,9 +34124,135 @@ void main(void)\r
         this._ctx = null;
       }
     }
+  };
+
+  // src/xiaozhi/audio/native-mic-capture.mjs
+  var NativeMicCapture = class _NativeMicCapture {
+    static STALL_MS = 1500;
+    static isSupported(bridge2 = globalThis.nativeWakeWord) {
+      return Boolean(bridge2 && typeof bridge2.startStream === "function" && typeof bridge2.onPcm === "function");
+    }
+    constructor({ bridge: bridge2 = globalThis.nativeWakeWord, onStall = null } = {}) {
+      this._bridge = bridge2;
+      this._frameHandlers = /* @__PURE__ */ new Set();
+      this._owners = /* @__PURE__ */ new Set();
+      this._open = false;
+      this._frameSize = APP_CONFIG.AUDIO.INPUT_FRAME_SIZE;
+      this._pending = new Float32Array(0);
+      this._lastChunkAt = 0;
+      this._watchdog = null;
+      this.onStall = onStall;
+      this.lastOpenTiming = null;
+      this.echoCancelled = true;
+      this._ctx = { sampleRate: APP_CONFIG.AUDIO.INPUT_SAMPLE_RATE };
+      this._unsubscribe = bridge2.onPcm((chunk) => this._onChunk(chunk));
+      try {
+        bridge2.stopStream?.();
+      } catch {
+      }
+    }
+    get isOpen() {
+      return this._open;
+    }
+    /** The native recorder's state ({ running, streaming, recording, audio_samples, ... }). */
+    status() {
+      try {
+        return this._bridge.getStatus?.() || null;
+      } catch {
+        return null;
+      }
+    }
+    onFrame(cb) {
+      if (typeof cb === "function") this._frameHandlers.add(cb);
+      return () => this._frameHandlers.delete(cb);
+    }
+    async start(owner = "default") {
+      this._owners.add(owner);
+      const t0 = performance.now();
+      const status = this._bridge.startStream() || {};
+      if (status.running === false) {
+        this._owners.delete(owner);
+        throw new Error(`native microphone unavailable: ${status.message || "unknown"}`);
+      }
+      if (!this._open) this._pending = new Float32Array(0);
+      this._open = true;
+      this._lastChunkAt = performance.now();
+      this.lastOpenTiming = { native_mic: Math.round(performance.now() - t0) };
+      this._startWatchdog();
+    }
+    async stop(owner = "default") {
+      this._owners.delete(owner);
+      if (this._owners.size > 0 || !this._open) return;
+      this._open = false;
+      this._stopWatchdog();
+      this._pending = new Float32Array(0);
+      try {
+        this._bridge.stopStream();
+      } catch {
+      }
+    }
+    /** Give the microphone up entirely (a video call is about to open its own). */
+    release() {
+      this._open = false;
+      this._owners.clear();
+      this._stopWatchdog();
+      try {
+        this._bridge.releaseMic?.();
+      } catch {
+      }
+    }
     async shutdown() {
       this._owners.clear();
       await this.stop("shutdown");
+      this.release();
+      if (this._unsubscribe) this._unsubscribe();
+      this._unsubscribe = null;
+    }
+    _startWatchdog() {
+      if (this._watchdog) return;
+      this._watchdog = setInterval(() => {
+        if (!this._open) return this._stopWatchdog();
+        const silentFor = performance.now() - this._lastChunkAt;
+        if (silentFor < _NativeMicCapture.STALL_MS) return;
+        const before = this.status();
+        let after = null;
+        try {
+          after = this._bridge.startStream();
+        } catch {
+        }
+        this._lastChunkAt = performance.now();
+        console.warn("[audio] native mic stalled; restarting the stream", { silentFor, before, after });
+        try {
+          this.onStall?.({ silent_ms: Math.round(silentFor), before, after });
+        } catch {
+        }
+      }, 500);
+    }
+    _stopWatchdog() {
+      if (this._watchdog) clearInterval(this._watchdog);
+      this._watchdog = null;
+    }
+    _onChunk(chunk) {
+      if (!this._open || !chunk || !chunk.length) return;
+      this._lastChunkAt = performance.now();
+      let buf = chunk;
+      if (this._pending.length) {
+        buf = new Float32Array(this._pending.length + chunk.length);
+        buf.set(this._pending);
+        buf.set(chunk, this._pending.length);
+      }
+      let offset = 0;
+      while (buf.length - offset >= this._frameSize) {
+        const frame = buf.slice(offset, offset + this._frameSize);
+        offset += this._frameSize;
+        for (const handler of this._frameHandlers) {
+          try {
+            handler(frame);
+          } catch {
+          }
+        }
+      }
+      this._pending = buf.slice(offset);
     }
   };
 
@@ -34092,7 +34273,7 @@ void main(void)\r
     async start() {
       if (this._node) return;
       this._ctx = new AudioContext();
-      if (this._ctx.state === "suspended") await this._ctx.resume();
+      await resumeContext(this._ctx, "playback");
       await this._ctx.audioWorklet.addModule(this._workletUrl);
       this._node = new AudioWorkletNode(this._ctx, "xiaozhi-playback", {
         processorOptions: {
@@ -34790,20 +34971,28 @@ void main(void)\r
       });
       this.decoder = new OpusDecoder({ scriptUrl: this.assetUrls.decoderScript });
       await this.decoder.init();
-      this.capture = new AudioCapture({ workletUrl: this.assetUrls.captureWorklet });
+      this.capture = NativeMicCapture.isSupported() ? new NativeMicCapture({ onStall: (info) => this._sendMicDebug("stall", info) }) : new AudioCapture({ workletUrl: this.assetUrls.captureWorklet });
+      console.log("[audio] conversation mic: " + (this.capture instanceof NativeMicCapture ? "native recorder" : "web audio"));
       this.capture.onFrame((frame) => {
         this._dbgFrames++;
         if (this._dbgFrames <= 3 || this._dbgFrames % 50 === 0) {
           console.log("[audio] capture frame #" + this._dbgFrames + " len=" + frame.length);
         }
         this.dispatchEvent(new CustomEvent("level", { detail: { rms: 0 } }));
-        if (this._sendingFrames && this.encoder) this.encoder.encode(frame);
+        if (!this._sendingFrames || !this.encoder) return;
+        if (this.capture.echoCancelled === false && this.state.device === DeviceState.SPEAKING) {
+          frame = new Float32Array(frame.length);
+        }
+        this.encoder.encode(frame);
       });
       this.player = new AudioPlayer({ workletUrl: this.assetUrls.playbackWorklet });
       this.player.onRms((rms) => {
         if (this._ttsTurn) this.mouth.feedRms(rms);
       });
       await this.player.start();
+      if (typeof globalThis.nativeWakeWord?.onNear === "function") {
+        globalThis.nativeWakeWord.onNear((near) => this._sendWakeDebug({ fired: false, ...near }));
+      }
       this.mcp.setSender((payload) => {
         if (this.protocol && this.protocol.isOpen()) this.protocol.sendMcp(payload);
       });
@@ -34992,8 +35181,25 @@ void main(void)\r
       this._wakeUnsubscribe = typeof unsubscribe === "function" ? unsubscribe : null;
       this._emitLog("info", "wake client attached");
     }
+    // Native mic diagnostics in the server log ({"type":"mic_debug"}): its state at each
+    // mic open, and every time the watchdog had to restart a stalled stream
+    _sendMicDebug(event, info = {}) {
+      try {
+        if (this.protocol?.isOpen?.()) this.protocol._sendText({ type: "mic_debug", event, ...info });
+      } catch {
+      }
+    }
+    _sendWakeDebug(info) {
+      try {
+        if (this.protocol?.isOpen?.()) this.protocol._sendText({ type: "wake_debug", ...info });
+      } catch {
+      }
+    }
     async activateFromWake(event = {}, { beforeListen } = {}) {
       const word = event?.word || "Hey Blimp";
+      if (typeof event?.score === "number") {
+        this._sendWakeDebug({ fired: true, keywords: event.keywords, score: event.score, level_dbfs: event.level_dbfs });
+      }
       this._emitLog("info", "wake word detected", { word, source: "wake-provider" });
       this.dispatchEvent(new CustomEvent("xz-status", {
         detail: { phase: "wake-triggered", message: "Waking...", word }
@@ -35005,7 +35211,7 @@ void main(void)\r
         if (this.protocol?.isOpen?.()) {
           await this.abort(AbortReason.WAKE_WORD_DETECTED);
         }
-        if (this._sendingFrames || this.capture?._node) {
+        if (this._sendingFrames || this.capture?.isOpen) {
           await this.stopListening();
         }
         await preparation;
@@ -35023,6 +35229,11 @@ void main(void)\r
         const reported = await this.sendText(word, { wake: true });
         if (reported) {
           await greeting;
+          const t2 = this._greetingTiming || {};
+          this._listenTiming = {
+            start: performance.now(),
+            greeting_drain_ms: t2.stop && t2.drained ? Math.round(t2.drained - t2.stop) : null
+          };
         } else {
           this._resolveGreetingWait();
           this._emitLog("warn", "wake-word report failed; continuing with microphone", { word });
@@ -35071,6 +35282,9 @@ void main(void)\r
         if (superseded()) return false;
       }
       this._emitLog("info", `start listening`, { mode });
+      const timing = this._listenTiming;
+      this._listenTiming = null;
+      const tEncoder = performance.now();
       try {
         await this._ensureEncoder();
         console.log("[audio] encoder ready");
@@ -35079,6 +35293,7 @@ void main(void)\r
         return false;
       }
       if (superseded()) return false;
+      const tCapture = performance.now();
       try {
         await this.capture.start("conversation");
         console.log("[audio] capture ready, ctx rate=" + (this.capture._ctx && this.capture._ctx.sampleRate));
@@ -35100,8 +35315,18 @@ void main(void)\r
       if (!(this._listenThroughReplies && this.state.device === DeviceState.SPEAKING)) {
         this.state.setDevice(DeviceState.LISTENING);
       }
+      const listenTiming = timing ? {
+        ...timing,
+        start: void 0,
+        encoder_ms: Math.round(tCapture - tEncoder),
+        ...Object.fromEntries(Object.entries(this.capture.lastOpenTiming || {}).map(([k2, v2]) => [`${k2}_ms`, v2])),
+        after_greeting_ms: Math.round(performance.now() - timing.start)
+      } : null;
+      if (listenTiming) console.log("[audio] mic open timing " + JSON.stringify(listenTiming));
+      if (typeof this.capture.status === "function") this._sendMicDebug("open", { native: this.capture.status() });
       this.protocol.sendStartListening(
-        this._listenThroughReplies || mode === ListeningMode.REALTIME ? "realtime" : mode === ListeningMode.AUTO_STOP ? "auto" : "manual"
+        this._listenThroughReplies || mode === ListeningMode.REALTIME ? "realtime" : mode === ListeningMode.AUTO_STOP ? "auto" : "manual",
+        listenTiming
       );
       return true;
     }
@@ -35196,6 +35421,7 @@ void main(void)\r
     // the wake some other way (reply audio, nothing) or not at all
     _awaitGreeting(timeoutMs = 8e3) {
       this._resolveGreetingWait();
+      this._greetingTiming = null;
       return new Promise((resolve2) => {
         const timer = setTimeout(() => this._resolveGreetingWait(), timeoutMs);
         this._greetingWaiter = () => {
@@ -35227,7 +35453,9 @@ void main(void)\r
           if (this._greetingWaiter && !msg.interrupted) {
             this.state.setDevice(DeviceState.IDLE);
             const waiter = this._greetingWaiter;
+            this._greetingTiming = { stop: performance.now() };
             (this.player ? this.player.drained() : Promise.resolve()).then(() => {
+              this._greetingTiming.drained = performance.now();
               if (this._greetingWaiter === waiter) this._resolveGreetingWait();
             });
           } else if (this._listenThroughReplies && this._sendingFrames) {
@@ -37217,6 +37445,10 @@ void main(void)\r
         await this.conversation.endSession();
       } catch {
       }
+      try {
+        this.conversation.capture?.release?.();
+      } catch {
+      }
     }
     async _releaseAudio() {
       if (!this._ownsAudio) return;
@@ -38124,8 +38356,34 @@ void main(void)\r
         setAvatar(msg);
       } else if (msg.type === "conversation") {
         runConversation(msg).catch((err) => log("error", `Portal ${msg.action} failed`, { error: String(err) }));
+      } else if (msg.type === "record_mic") {
+        recordSample(msg);
       }
     });
+    const pendingSamples = /* @__PURE__ */ new Map();
+    const native = globalThis.nativeWakeWord;
+    if (typeof native?.onSample === "function") {
+      native.onSample((s2) => {
+        const timer = pendingSamples.get(s2.id);
+        if (timer === void 0) return;
+        clearTimeout(timer);
+        pendingSamples.delete(s2.id);
+        channel.send({ type: "reply", id: s2.id, ok: true, wav: s2.wav, score: s2.score, level_dbfs: s2.level_dbfs, keywords: s2.keywords });
+      });
+    }
+    function recordSample({ id, seconds, keywords }) {
+      const fail = (error) => channel.send({ type: "reply", id, ok: false, error });
+      if (typeof native?.recordSample !== "function") return fail("Only the Android app can record samples");
+      if (callController?.busy) return fail("A video call has the microphone");
+      const status = native.recordSample(seconds || 2.5, id, keywords === "answer" ? "answer" : "wake");
+      if (status?.message === "sampling_busy") return fail("Already recording");
+      if (status?.running === false) return fail(`Microphone unavailable: ${status.message || "unknown"}`);
+      log("info", `Portal: recording a ${seconds || 2.5} s wake word sample`);
+      pendingSamples.set(id, setTimeout(() => {
+        pendingSamples.delete(id);
+        fail("The recording did not finish");
+      }, ((seconds || 2.5) + 8) * 1e3));
+    }
     function setAvatar(msg) {
       if (msg.expression === "None") avatar.clearExpression();
       else if (expressions.includes(msg.expression)) avatar.setExpression(msg.expression);

@@ -121,8 +121,37 @@ export function startRemoteControl({ conversation, identity, callController, get
       setAvatar(msg);
     } else if (msg.type === "conversation") {
       runConversation(msg).catch((err) => log("error", `Portal ${msg.action} failed`, { error: String(err) }));
+    } else if (msg.type === "record_mic") {
+      recordSample(msg);
     }
   });
+
+  // Portal "Wake word samples": record N seconds from the wake word's own
+  // microphone (Android) and send the clip back as {"type":"reply"}
+  const pendingSamples = new Map();
+  const native = globalThis.nativeWakeWord;
+  if (typeof native?.onSample === "function") {
+    native.onSample((s) => {
+      const timer = pendingSamples.get(s.id);
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      pendingSamples.delete(s.id);
+      channel.send({ type: "reply", id: s.id, ok: true, wav: s.wav, score: s.score, level_dbfs: s.level_dbfs, keywords: s.keywords });
+    });
+  }
+  function recordSample({ id, seconds, keywords }) {
+    const fail = (error) => channel.send({ type: "reply", id, ok: false, error });
+    if (typeof native?.recordSample !== "function") return fail("Only the Android app can record samples");
+    if (callController?.busy) return fail("A video call has the microphone");
+    const status = native.recordSample(seconds || 2.5, id, keywords === "answer" ? "answer" : "wake");
+    if (status?.message === "sampling_busy") return fail("Already recording");
+    if (status?.running === false) return fail(`Microphone unavailable: ${status.message || "unknown"}`);
+    log("info", `Portal: recording a ${seconds || 2.5} s wake word sample`);
+    pendingSamples.set(id, setTimeout(() => {
+      pendingSamples.delete(id);
+      fail("The recording did not finish");
+    }, ((seconds || 2.5) + 8) * 1000));
+  }
 
   // Like the Debug panel: expression buttons, Blink, and the two switches
   function setAvatar(msg) {
